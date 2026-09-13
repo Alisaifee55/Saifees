@@ -23,7 +23,7 @@
      you have (woff2/woff/ttf — include whichever formats you own). */
   @font-face{
     font-family: 'FatemiQanz';
-    src: url('fonts/Al-Kanz%20for%20Windows.ttf') format('truetype');
+    src: url('fonts/Al-Kanz-for-Windows.ttf') format('truetype');
     font-display: swap;
   }
   @font-face{
@@ -124,14 +124,26 @@ async function callApi(action, payload){
     alert('Backend not connected yet: paste your Apps Script Web App URL into APPS_SCRIPT_URL in the code.');
     throw new Error('APPS_SCRIPT_URL not set');
   }
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, payload })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout instead of hanging forever
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, payload }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    let data;
+    try { data = await res.json(); }
+    catch(parseErr) { throw new Error('Backend did not return valid JSON. Check that your Apps Script Web App is deployed with "Anyone" access and that you redeployed a new version after any code changes.'); }
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch(err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') throw new Error('The backend took too long to respond (15s timeout). Check your Apps Script URL and deployment.');
+    throw err;
+  }
 }
 
 let DB = { families: [], members: [], events: [], votes: [], messages: [], notifications: [] };
@@ -157,8 +169,17 @@ function registerPushForMember(memberId){
 
 /* ================= Render root ================= */
 async function boot(){
-  await loadDB();
-  render();
+  try {
+    DB = await callApi('getAll', {});
+    render();
+  } catch(e) {
+    document.getElementById('app').innerHTML = `
+      <div style="padding:30px;text-align:center;">
+        <h2 style="color:#8E2A2A;">Couldn't reach the backend</h2>
+        <p class="muted">${escapeHtml(e.message)}</p>
+        <button class="btn-primary" style="max-width:200px;margin:10px auto;" onclick="boot()">Retry</button>
+      </div>`;
+  }
 }
 function render(){
   const app = document.getElementById('app');
