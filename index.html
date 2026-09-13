@@ -72,11 +72,15 @@
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
   .calday{border-radius:12px;padding:6px 2px 8px;min-height:58px;background:#fdfaf5;position:relative;}
-  .calday .g{font-size:10px;color:var(--muted);}
-  .calday .h{font-size:22px;font-weight:700;color:var(--grey);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
+  .calday .h{font-size:22px;font-weight:700;color:var(--teal);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
+  .calday .g{font-size:10px;color:var(--muted);margin-top:2px;}
   .calday.today{background:var(--orange-light);border:2px solid var(--orange);}
+  .calday.today .h{color:var(--orange-dark);}
   .calday.event .h{color:var(--teal);}
   .calday.past .h{color:var(--red);}
+  .calday.greyday{background:#f5f2eb;}
+  .calday.greyday .h{color:var(--grey);}
+  .calday.greyday .g{color:#cfc8bd;}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--orange);margin:4px auto 0;}
   .empty{visibility:hidden;}
   .notif-item{padding:8px 0;border-bottom:1px solid #f1ebe1;font-size:13px;}
@@ -112,6 +116,20 @@ function gregorianToHijri(gy, gm, gd){
   return {hy, hm, hd};
 }
 const HIJRI_MONTHS = ["Muharram","Safar","Rabi al-Awwal","Rabi al-Akhar","Jumada al-Ula","Jumada al-Akhira","Rajab","Sha'ban","Ramadan","Shawwal","Dhul Qadah","Dhul Hijjah"];
+function hijriToGregorian(hy, hm, hd){
+  const jd = hd + Math.ceil(29.5*(hm-1)) + (hy-1)*354 + Math.floor((3+11*hy)/30) + 1948440 - 1;
+  let l = jd + 68569;
+  const n = Math.floor((4*l)/146097);
+  l = l - Math.floor((146097*n+3)/4);
+  const i = Math.floor((4000*(l+1))/1461001);
+  l = l - Math.floor((1461*i)/4) + 31;
+  const j = Math.floor((80*l)/2447);
+  const day = l - Math.floor((2447*j)/80);
+  l = Math.floor(j/11);
+  const month = j + 2 - 12*l;
+  const year = 100*(n-49) + i + l;
+  return new Date(year, month-1, day);
+}
 const ARABIC_DIGITS = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
 function toArabicNum(n){ return String(n).split('').map(c=>ARABIC_DIGITS[+c]||c).join(''); }
 function ymdKey(d){ return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
@@ -149,7 +167,7 @@ async function callApi(action, payload){
 let DB = { families: [], members: [], events: [], votes: [], messages: [], notifications: [] };
 let session = null;
 let activeTab = 'calendar';
-let calMonthOffset = 0;
+let hijriViewY = null, hijriViewM = null; // initialized on first render from today's date
 let notifOpen = false;
 const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
 
@@ -307,22 +325,63 @@ async function doAdminLogin(){
   render();
 }
 
+function shiftHijriMonth(delta){
+  hijriViewM += delta;
+  if(hijriViewM > 12){ hijriViewM = 1; hijriViewY++; }
+  if(hijriViewM < 1){ hijriViewM = 12; hijriViewY--; }
+  render();
+}
+function goToTodayHijri(){
+  const now = new Date();
+  const h = gregorianToHijri(now.getFullYear(), now.getMonth()+1, now.getDate());
+  hijriViewY = h.hy; hijriViewM = h.hm;
+  render();
+}
 /* ================= CALENDAR ================= */
 function renderCalendar(){
   const main = document.getElementById('main');
   const now = new Date();
-  const viewDate = new Date(now.getFullYear(), now.getMonth()+calMonthOffset, 1);
-  const y = viewDate.getFullYear(), m = viewDate.getMonth();
-  const firstDow = new Date(y,m,1).getDay();
-  const daysInMonth = new Date(y,m+1,0).getDate();
-  const hStart = gregorianToHijri(y,m+1,1);
-  const monthLabel = `${HIJRI_MONTHS[(hStart.hm-1+12)%12].toUpperCase()} - ${hStart.hy} AH`;
+  if(hijriViewY === null){
+    const h0 = gregorianToHijri(now.getFullYear(), now.getMonth()+1, now.getDate());
+    hijriViewY = h0.hy; hijriViewM = h0.hm;
+  }
+  const monthLabel = `${HIJRI_MONTHS[hijriViewM-1].toUpperCase()} - ${hijriViewY} AH`;
+  const monthStart = hijriToGregorian(hijriViewY, hijriViewM, 1);
 
-  let cells = '';
-  for(let i=0;i<firstDow;i++) cells += `<div class="calday empty"></div>`;
-  for(let d=1; d<=daysInMonth; d++){
-    const date = new Date(y,m,d);
-    const h = gregorianToHijri(y,m+1,d);
+  // find length of this hijri month by walking forward until the hijri month/year changes
+  let length = 0;
+  let walker = new Date(monthStart);
+  while(true){
+    const h = gregorianToHijri(walker.getFullYear(), walker.getMonth()+1, walker.getDate());
+    if(h.hy===hijriViewY && h.hm===hijriViewM){ length++; walker.setDate(walker.getDate()+1); }
+    else break;
+  }
+
+  const firstDow = monthStart.getDay();
+  const cells = [];
+  // leading days (previous hijri month, greyed)
+  for(let i=firstDow; i>=1; i--){
+    const dt = new Date(monthStart); dt.setDate(dt.getDate()-i);
+    cells.push({date:dt, grey:true});
+  }
+  // this month's days
+  for(let d=0; d<length; d++){
+    const dt = new Date(monthStart); dt.setDate(dt.getDate()+d);
+    cells.push({date:dt, grey:false});
+  }
+  // trailing days (next hijri month, greyed) to complete the grid
+  const remainder = cells.length % 7;
+  if(remainder !== 0){
+    const extra = 7 - remainder;
+    for(let i=0;i<extra;i++){
+      const dt = new Date(monthStart); dt.setDate(dt.getDate()+length+i);
+      cells.push({date:dt, grey:true});
+    }
+  }
+
+  let cellsHtml = cells.map(c=>{
+    const date = c.date;
+    const h = gregorianToHijri(date.getFullYear(), date.getMonth()+1, date.getDate());
     const key = ymdKey(date);
     const isToday = ymdKey(now)===key;
     const isPast = date < new Date(now.getFullYear(),now.getMonth(),now.getDate());
@@ -330,25 +389,31 @@ function renderCalendar(){
     let cls = 'calday';
     if(isToday) cls+=' today';
     else if(ev) cls+=' event';
-    else if(isPast) cls+=' past';
-    cells += `<div class="${cls}" ${ev?`onclick="openEventDetail('${ev.id}')"`:''} style="${ev?'cursor:pointer':''}">
-      <div class="g">${d}</div>
+    else if(isPast && !c.grey) cls+=' past';
+    if(c.grey) cls+=' greyday';
+    const gLabel = date.getDate()===1
+      ? `${date.getDate()} ${date.toLocaleString('en',{month:'short'})}`
+      : `${date.getDate()}`;
+    return `<div class="${cls}" ${ev?`onclick="openEventDetail('${ev.id}')"`:''} style="${ev?'cursor:pointer':''}">
       <div class="h">${toArabicNum(h.hd)}</div>
+      <div class="g">${gLabel}</div>
       ${ev?'<div class="dot"></div>':''}
     </div>`;
-  }
+  }).join('');
+
   main.innerHTML = `
     <div class="card">
       <div class="row" style="margin-bottom:8px;">
-        <button class="btn-secondary btn-small" onclick="calMonthOffset--;render()">&larr; Prev</button>
-        <button class="btn-secondary btn-small" onclick="calMonthOffset++;render()">Next &rarr;</button>
+        <button class="btn-secondary btn-small" onclick="shiftHijriMonth(-1)">&larr; Prev</button>
+        <button class="btn-secondary btn-small" onclick="goToTodayHijri()">Today</button>
+        <button class="btn-secondary btn-small" onclick="shiftHijriMonth(1)">Next &rarr;</button>
       </div>
       <div class="calhead">${monthLabel}</div>
       <div class="calgrid">
         ${['S','M','T','W','T','F','S'].map(d=>`<div class="caldow">${d}</div>`).join('')}
-        ${cells}
+        ${cellsHtml}
       </div>
-      <div class="muted" style="margin-top:10px;">Tap a highlighted date to see totals. Orange dot = meal event scheduled.</div>
+      <div class="muted" style="margin-top:10px;">Tap a highlighted date to see totals. Orange dot = meal event scheduled. Greyed dates belong to the adjacent Hijri month.</div>
     </div>
     <div id="eventDetail"></div>
   `;
