@@ -130,6 +130,22 @@ function hijriToGregorian(hy, hm, hd){
   const year = 100*(n-49) + i + l;
   return new Date(year, month-1, day);
 }
+const HIJRI_MONTHS_AR = ["محرم","صفر","ربيع الأول","ربيع الآخر","جمادى الأولى","جمادى الآخرة","رجب","شعبان","رمضان","شوال","ذو القعدة","ذو الحجة"];
+function findHijriMonthStart(hy, hm){
+  // hijriToGregorian is only ~1 day accurate; self-correct so it round-trips exactly to hd=1
+  let guess = hijriToGregorian(hy, hm, 1);
+  for(let attempts=0; attempts<8; attempts++){
+    const h = gregorianToHijri(guess.getFullYear(), guess.getMonth()+1, guess.getDate());
+    if(h.hy===hy && h.hm===hm && h.hd===1) break;
+    if(h.hy===hy && h.hm===hm){
+      guess.setDate(guess.getDate() + (1 - h.hd));
+    } else {
+      const beforeTarget = (h.hy<hy) || (h.hy===hy && h.hm<hm);
+      guess.setDate(guess.getDate() + (beforeTarget ? 1 : -1));
+    }
+  }
+  return guess;
+}
 const ARABIC_DIGITS = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
 function toArabicNum(n){ return String(n).split('').map(c=>ARABIC_DIGITS[+c]||c).join(''); }
 function ymdKey(d){ return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
@@ -262,7 +278,6 @@ let authMode = 'login';
 function renderAuth(){
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="banner">First time setup: make sure APPS_SCRIPT_URL is set in the code, and Script Properties (ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY) are configured in your Apps Script project.</div>
     <div class="card">
       <h2>Welcome</h2>
       <div class="row" style="margin-bottom:10px;">
@@ -345,8 +360,8 @@ function renderCalendar(){
     const h0 = gregorianToHijri(now.getFullYear(), now.getMonth()+1, now.getDate());
     hijriViewY = h0.hy; hijriViewM = h0.hm;
   }
-  const monthLabel = `${HIJRI_MONTHS[hijriViewM-1].toUpperCase()} - ${hijriViewY} AH`;
-  const monthStart = hijriToGregorian(hijriViewY, hijriViewM, 1);
+  const monthLabel = `${HIJRI_MONTHS[hijriViewM-1].toUpperCase()} - ${hijriViewY}`;
+  const monthStart = findHijriMonthStart(hijriViewY, hijriViewM);
 
   // find length of this hijri month by walking forward until the hijri month/year changes
   let length = 0;
@@ -408,7 +423,7 @@ function renderCalendar(){
         <button class="btn-secondary btn-small" onclick="goToTodayHijri()">Today</button>
         <button class="btn-secondary btn-small" onclick="shiftHijriMonth(1)">Next &rarr;</button>
       </div>
-      <div class="calhead">${monthLabel}</div>
+      <div class="calhead">${monthLabel}<div style="font-size:19px;margin-top:4px;font-family:'FatemiQanz','Segoe UI',sans-serif;" dir="rtl">${HIJRI_MONTHS_AR[hijriViewM-1]}</div></div>
       <div class="calgrid">
         ${['S','M','T','W','T','F','S'].map(d=>`<div class="caldow">${d}</div>`).join('')}
         ${cellsHtml}
