@@ -17,6 +17,17 @@
 </script>
 
 <style>
+  /* Fatemi Qanz / Al-Kanz font: this is a licensed Lisan al-Dawat community font,
+     not available on public CDNs. Add your own font file(s) to a /fonts folder next to
+     this index.html in your repo, then update the url() paths below to match the filename(s)
+     you have (woff2/woff/ttf — include whichever formats you own). */
+  @font-face{
+    font-family: 'FatemiQanz';
+    src: url('fonts/FatemiQanz.woff2') format('woff2'),
+         url('fonts/FatemiQanz.woff') format('woff'),
+         url('fonts/FatemiQanz.ttf') format('truetype');
+    font-display: swap;
+  }
   :root{
     --orange:#E8703A; --orange-dark:#C85A28; --orange-light:#FCE3D3;
     --teal:#127A79; --teal-dark:#0D5A59; --teal-light:#DCF0EF;
@@ -54,12 +65,12 @@
   .pill{padding:6px 10px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid #ddd;background:#fff;}
   .pill.on{background:var(--teal);color:#fff;border-color:var(--teal);}
   .pill.off{background:var(--orange);color:#fff;border-color:var(--orange);}
-  .calhead{background:var(--orange-light);border-radius:12px;padding:10px;text-align:center;font-weight:800;color:var(--orange-dark);letter-spacing:.5px;margin-bottom:12px;}
+  .calhead{background:var(--orange-light);border-radius:12px;padding:10px;text-align:center;font-weight:800;color:var(--orange-dark);letter-spacing:.5px;margin-bottom:12px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
   .calday{border-radius:12px;padding:6px 2px 8px;min-height:58px;background:#fdfaf5;position:relative;}
   .calday .g{font-size:10px;color:var(--muted);}
-  .calday .h{font-size:20px;font-weight:700;color:var(--grey);margin-top:2px;}
+  .calday .h{font-size:22px;font-weight:700;color:var(--grey);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
   .calday.today{background:var(--orange-light);border:2px solid var(--orange);}
   .calday.event .h{color:var(--teal);}
   .calday.past .h{color:var(--red);}
