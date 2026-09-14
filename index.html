@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Saifee's Calendar</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#127A79">
 
 <!-- OneSignal Web Push -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
@@ -220,7 +225,9 @@ function render(){
   app.innerHTML = `
     <header class="topbar">
       <div>
-        <h1>Saifee's Calendar</h1>
+        <div style="background:#fff;border-radius:10px;padding:4px 10px;display:inline-block;">
+          <img src="logo-transparent.png" alt="Saifee's Calendar" style="height:32px;display:block;">
+        </div>
         <div class="who">${session ? escapeHtml(session.name)+' · '+session.role : 'Not logged in'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
