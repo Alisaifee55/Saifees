@@ -201,9 +201,18 @@ function findMember(memberId){ return DB.members.find(m=>m.id===memberId); }
 
 function registerPushForMember(memberId){
   window.__pendingExternalId = memberId;
-  if (window.__oneSignalReady && window.OneSignal) {
-    OneSignalDeferred.push(async function(OneSignal){ OneSignal.login(memberId); });
-  }
+  OneSignalDeferred.push(async function(OneSignal){
+    await OneSignal.login(memberId);
+    if (OneSignal.Notifications.permission !== true) {
+      await OneSignal.Notifications.requestPermission(); // triggers the browser's Allow/Block prompt
+    }
+  });
+}
+function enableNotifications(){
+  OneSignalDeferred.push(async function(OneSignal){
+    await OneSignal.Notifications.requestPermission();
+    alert(OneSignal.Notifications.permission === true ? 'Notifications enabled!' : 'Notifications are still blocked. Check your browser/site settings.');
+  });
 }
 
 /* ================= Render root ================= */
@@ -231,6 +240,7 @@ function render(){
         <div class="who">${session ? escapeHtml(session.name)+' · '+session.role : 'Not logged in'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
+        ${session && session.role!=='admin' ? `<a class="link" style="color:#fff;" onclick="enableNotifications()">🔔 Enable</a>` : ''}
         ${session && session.role!=='admin' ? bellHtml() : ''}
         ${session ? `<a class="link" style="color:#fff;" onclick="logout()">Logout</a>` : ''}
       </div>
