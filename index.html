@@ -216,17 +216,30 @@ function enableNotifications(){
 }
 
 /* ================= Render root ================= */
+function saveSession(){
+  try{ localStorage.setItem('saifees_session', JSON.stringify(session)); }catch(e){}
+}
+function loadSession(){
+  try{ const s = localStorage.getItem('saifees_session'); return s ? JSON.parse(s) : null; }catch(e){ return null; }
+}
+function clearSession(){
+  try{ localStorage.removeItem('saifees_session'); }catch(e){}
+}
 async function boot(){
+  session = loadSession(); // instant: restore login without waiting on the network
+  render(); // paint immediately with whatever we have (empty DB is fine — calendar grid still works)
   try {
     DB = await callApi('getAll', {});
-    render();
+    render(); // re-render once real data arrives
+    if(session) registerPushForMember(session.memberId);
   } catch(e) {
-    document.getElementById('app').innerHTML = `
-      <div style="padding:30px;text-align:center;">
-        <h2 style="color:#8E2A2A;">Couldn't reach the backend</h2>
+    const main = document.getElementById('main');
+    if(main) main.insertAdjacentHTML('afterbegin', `
+      <div class="card" style="border:1px solid #E8703A;">
+        <b style="color:#8E2A2A;">Couldn't reach the backend</b>
         <p class="muted">${escapeHtml(e.message)}</p>
-        <button class="btn-primary" style="max-width:200px;margin:10px auto;" onclick="boot()">Retry</button>
-      </div>`;
+        <button class="btn-primary" onclick="boot()">Retry</button>
+      </div>`);
   }
 }
 function render(){
@@ -288,7 +301,7 @@ function tabbarHtml(){
     </button>`).join('')}</div>`;
 }
 async function setTab(t){ activeTab=t; notifOpen=false; await loadDB(); render(); }
-function logout(){ session=null; activeTab='calendar'; render(); }
+function logout(){ session=null; clearSession(); activeTab='calendar'; render(); }
 
 /* ================= AUTH ================= */
 let authMode = 'login';
@@ -331,6 +344,7 @@ async function doRegisterFamily(){
     const res = await callApi('registerFamily', {name, headName, password});
     if(res.error) return alert(res.error);
     session = {role:'head', familyId:res.familyId, memberId:res.memberId, name:res.name};
+    saveSession();
     registerPushForMember(res.memberId);
     await loadDB();
     authMode='login';
@@ -344,6 +358,7 @@ async function doLogin(){
     const res = await callApi('login', {name, password});
     if(res.error) return alert(res.error);
     session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name};
+    saveSession();
     registerPushForMember(res.memberId);
     await loadDB();
     render();
@@ -353,6 +368,7 @@ async function doAdminLogin(){
   const pass = document.getElementById('adminPass').value;
   if(pass !== ADMIN_PASSCODE) return alert('Incorrect passcode.');
   session = {role:'admin', name:'Super Admin', memberId:'ADMIN'};
+  saveSession();
   await loadDB();
   render();
 }
