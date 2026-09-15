@@ -10,6 +10,9 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#127A79">
 
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
 <!-- OneSignal Web Push -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
@@ -22,20 +25,6 @@
 </script>
 
 <style>
-  /* Fatemi Qanz / Al-Kanz font: this is a licensed Lisan al-Dawat community font,
-     not available on public CDNs. Add your own font file(s) to a /fonts folder next to
-     this index.html in your repo, then update the url() paths below to match the filename(s)
-     you have (woff2/woff/ttf — include whichever formats you own). */
-  @font-face{
-    font-family: 'FatemiQanz';
-    src: url('fonts/Al-Kanz-for-Windows.ttf') format('truetype');
-    font-display: swap;
-  }
-  @font-face{
-    font-family: 'FatemiQanzAlt';
-    src: url('fonts/Kanz-al-Marjaan.ttf') format('truetype');
-    font-display: swap;
-  }
   :root{
     --orange:#E8703A; --orange-dark:#C85A28; --orange-light:#FCE3D3;
     --teal:#127A79; --teal-dark:#0D5A59; --teal-light:#DCF0EF;
@@ -44,9 +33,9 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--cream);color:var(--ink);}
+  @font-face{ font-family:'FatemiQanz'; src:url('fonts/Al-Kanz-for-Windows.ttf') format('truetype'); font-display:swap; }
   #app{max-width:520px;margin:0 auto;min-height:100vh;background:var(--cream);padding-bottom:80px;}
   header.topbar{background:var(--teal);color:#fff;padding:16px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;}
-  header.topbar h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.3px;}
   header.topbar .who{font-size:12px;opacity:.9;}
   .bell{position:relative;cursor:pointer;font-size:20px;}
   .bell .dot{position:absolute;top:-4px;right:-6px;background:var(--orange);color:#fff;border-radius:10px;font-size:10px;padding:1px 5px;}
@@ -64,16 +53,17 @@
   .tag-yes{background:var(--teal-light);color:var(--teal-dark);}
   .tag-no{background:var(--orange-light);color:var(--orange-dark);}
   .tabbar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #eee;display:flex;max-width:520px;margin:0 auto;z-index:10;}
-  .tabbar button{flex:1;background:none;border-radius:0;padding:10px 2px;font-size:11px;color:var(--muted);font-weight:600;}
+  .tabbar button{flex:1;background:none;border-radius:0;padding:10px 2px;font-size:11px;color:var(--muted);font-weight:600;position:relative;}
   .tabbar button.active{color:var(--orange);}
   .tabicon{display:block;font-size:18px;margin-bottom:2px;}
+  .tabbadge{position:absolute;top:2px;right:22%;background:var(--orange);color:#fff;border-radius:10px;font-size:10px;padding:1px 5px;}
   .muted{color:var(--muted);font-size:12px;}
   .memberrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1EBE1;}
   .memberrow:last-child{border-bottom:none;}
   .pill{padding:6px 10px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid #ddd;background:#fff;}
   .pill.on{background:var(--teal);color:#fff;border-color:var(--teal);}
   .pill.off{background:var(--orange);color:#fff;border-color:var(--orange);}
-  .calhead{background:var(--orange-light);border-radius:12px;padding:10px;text-align:center;font-weight:800;color:var(--orange-dark);letter-spacing:.5px;margin-bottom:12px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
+  .calhead{background:var(--orange-light);border-radius:12px;padding:10px;text-align:center;font-weight:800;color:var(--orange-dark);letter-spacing:.5px;margin-bottom:12px;}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
   .calday{border-radius:12px;padding:6px 2px 8px;min-height:58px;background:#fdfaf5;position:relative;}
@@ -87,13 +77,19 @@
   .calday.greyday .h{color:var(--grey);}
   .calday.greyday .g{color:#cfc8bd;}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--orange);margin:4px auto 0;}
-  .empty{visibility:hidden;}
   .notif-item{padding:8px 0;border-bottom:1px solid #f1ebe1;font-size:13px;}
-  .msgline{padding:8px 10px;border-radius:12px;margin-bottom:6px;max-width:80%;font-size:13px;}
+  .msgline{padding:8px 10px;border-radius:12px;margin-bottom:4px;max-width:80%;font-size:13px;}
   .msg-me{background:var(--teal);color:#fff;margin-left:auto;}
   .msg-them{background:#f1ebe1;}
+  .seen{font-size:10px;color:var(--muted);text-align:right;margin:-2px 2px 8px auto;max-width:80%;}
   a.link{color:var(--teal-dark);font-weight:700;font-size:13px;cursor:pointer;}
-  .banner{background:#fff3cd;border:1px solid #ffe08a;color:#7a5b00;padding:10px 14px;border-radius:10px;font-size:12px;margin-bottom:12px;}
+  .convo{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #F1EBE1;cursor:pointer;}
+  .convo:last-child{border-bottom:none;}
+  .convo .preview{font-size:12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .unreadbadge{background:var(--orange);color:#fff;border-radius:10px;font-size:11px;padding:1px 7px;font-weight:700;}
+  .subtabs{display:flex;gap:8px;margin-bottom:12px;}
+  .subtabs button{flex:1;}
+  .subtabs button.active{background:var(--teal);color:#fff;}
 </style>
 </head>
 <body>
@@ -101,10 +97,12 @@
 
 <script>
 /* =========== CONFIG =========== */
-// Paste your deployed Google Apps Script Web App URL here (ends in /exec)
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbywE59_chzmhx63j7k3dx4tv4Maat_-cJt6RD4VdEvQspW53CIi_pDmmvfXD4R35XFssw/exec";
+const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
 
-/* ================= Hijri conversion (tabular / "Kuwaiti" algorithm, ~1 day accuracy) ================= */
+/* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
   let jd = Math.floor((1461*(gy + 4800 + Math.floor((gm-14)/12)))/4) +
            Math.floor((367*(gm-2-12*Math.floor((gm-14)/12)))/12) -
@@ -120,7 +118,6 @@ function gregorianToHijri(gy, gm, gd){
   let hy = 30*n + j - 30;
   return {hy, hm, hd};
 }
-const HIJRI_MONTHS = ["Muharram","Safar","Rabi al-Awwal","Rabi al-Akhar","Jumada al-Ula","Jumada al-Akhira","Rajab","Sha'ban","Ramadan","Shawwal","Dhul Qadah","Dhul Hijjah"];
 function hijriToGregorian(hy, hm, hd){
   const jd = hd + Math.ceil(29.5*(hm-1)) + (hy-1)*354 + Math.floor((3+11*hy)/30) + 1948440 - 1;
   let l = jd + 68569;
@@ -135,104 +132,195 @@ function hijriToGregorian(hy, hm, hd){
   const year = 100*(n-49) + i + l;
   return new Date(year, month-1, day);
 }
+const HIJRI_MONTHS = ["Muharram","Safar","Rabi al-Awwal","Rabi al-Akhar","Jumada al-Ula","Jumada al-Akhira","Rajab","Sha'ban","Ramadan","Shawwal","Dhul Qadah","Dhul Hijjah"];
 const HIJRI_MONTHS_AR = ["محرم","صفر","ربيع الأول","ربيع الآخر","جمادى الأولى","جمادى الآخرة","رجب","شعبان","رمضان","شوال","ذو القعدة","ذو الحجة"];
+const ARABIC_DIGITS = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+function toArabicNum(n){ return String(n).split('').map(c=>ARABIC_DIGITS[+c]||c).join(''); }
+function ymdKey(d){ return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function findHijriMonthStart(hy, hm){
-  // hijriToGregorian is only ~1 day accurate; self-correct so it round-trips exactly to hd=1
   let guess = hijriToGregorian(hy, hm, 1);
   for(let attempts=0; attempts<8; attempts++){
     const h = gregorianToHijri(guess.getFullYear(), guess.getMonth()+1, guess.getDate());
     if(h.hy===hy && h.hm===hm && h.hd===1) break;
-    if(h.hy===hy && h.hm===hm){
-      guess.setDate(guess.getDate() + (1 - h.hd));
-    } else {
-      const beforeTarget = (h.hy<hy) || (h.hy===hy && h.hm<hm);
-      guess.setDate(guess.getDate() + (beforeTarget ? 1 : -1));
-    }
+    if(h.hy===hy && h.hm===hm){ guess.setDate(guess.getDate() + (1 - h.hd)); }
+    else { const before = (h.hy<hy) || (h.hy===hy && h.hm<hm); guess.setDate(guess.getDate() + (before ? 1 : -1)); }
   }
   return guess;
 }
-const ARABIC_DIGITS = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
-function toArabicNum(n){ return String(n).split('').map(c=>ARABIC_DIGITS[+c]||c).join(''); }
-function ymdKey(d){ return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate(); }
-function uid(){ return Math.random().toString(36).slice(2,10); }
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-/* ================= Backend calls (Google Apps Script) ================= */
-async function callApi(action, payload){
-  if (APPS_SCRIPT_URL.includes('PASTE_YOUR')) {
-    alert('Backend not connected yet: paste your Apps Script Web App URL into APPS_SCRIPT_URL in the code.');
-    throw new Error('APPS_SCRIPT_URL not set');
-  }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout instead of hanging forever
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, payload }),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    let data;
-    try { data = await res.json(); }
-    catch(parseErr) { throw new Error('Backend did not return valid JSON. Check that your Apps Script Web App is deployed with "Anyone" access and that you redeployed a new version after any code changes.'); }
-    if (data.error) throw new Error(data.error);
-    return data;
-  } catch(err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') throw new Error('The backend took too long to respond (15s timeout). Check your Apps Script URL and deployment.');
-    throw err;
-  }
-}
-
+/* ================= State ================= */
 let DB = { families: [], members: [], events: [], votes: [], messages: [], notifications: [] };
 let session = null;
 let activeTab = 'calendar';
-let hijriViewY = null, hijriViewM = null; // initialized on first render from today's date
+let hijriViewY = null, hijriViewM = null;
 let notifOpen = false;
-const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
+let msgSubTab = 'chats'; // 'chats' | 'announcements'
+let msgWith = null;
+let heartbeatTimer = null;
 
-async function loadDB(){
-  try { DB = await callApi('getAll', {}); }
-  catch(e){ console.error(e); }
+function saveSession(){ try{ localStorage.setItem('saifees_session', JSON.stringify(session)); }catch(e){} }
+function loadSession(){ try{ const s = localStorage.getItem('saifees_session'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function clearSession(){ try{ localStorage.removeItem('saifees_session'); }catch(e){} }
+
+/* ================= Data access (Supabase) ================= */
+async function loadAll(){
+  const [fam, mem, ev, vt, ms, nt] = await Promise.all([
+    sb.from('families').select('*'),
+    sb.from('members').select('*'),
+    sb.from('events').select('*'),
+    sb.from('votes').select('*'),
+    sb.from('messages').select('*').order('sent_at', {ascending:true}),
+    sb.from('notifications').select('*').order('at', {ascending:false}),
+  ]);
+  if(fam.error) throw fam.error;
+  DB = {
+    families: fam.data||[], members: mem.data||[], events: ev.data||[],
+    votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[]
+  };
 }
-function membersOfFamily(familyId){ return DB.members.filter(m=>m.familyId===familyId); }
-function findMember(memberId){ return DB.members.find(m=>m.id===memberId); }
+function nameTaken(name, exceptId){
+  return DB.members.some(m => m.name.toLowerCase()===name.toLowerCase() && m.id!==exceptId);
+}
+function membersOfFamily(familyId){ return DB.members.filter(m=>m.family_id===familyId); }
+function findMember(id){ return DB.members.find(m=>m.id===id); }
+function famName(id){ return (DB.families.find(f=>f.id===id)||{}).name || ''; }
 
-function registerPushForMember(memberId){
-  window.__pendingExternalId = memberId;
-  OneSignalDeferred.push(async function(OneSignal){
-    await OneSignal.login(memberId);
-    if (OneSignal.Notifications.permission !== true) {
-      await OneSignal.Notifications.requestPermission(); // triggers the browser's Allow/Block prompt
+async function addNotification(memberId, text){
+  await sb.from('notifications').insert({member_id: memberId, text});
+}
+async function sendPush(target, message){
+  try{ await sb.functions.invoke('send-push', { body: { target, message } }); }
+  catch(e){ console.error('push failed', e); }
+}
+
+async function registerFamily(name, headName, password){
+  if(DB.families.some(f=>f.name.toLowerCase()===name.toLowerCase())) return {error:'Family name already taken.'};
+  if(nameTaken(headName)) return {error:'That member name is already used. Please add a surname/initial.'};
+  const { data: fam, error: e1 } = await sb.from('families').insert({name, password}).select().single();
+  if(e1) return {error:e1.message};
+  const { data: mem, error: e2 } = await sb.from('members').insert({
+    family_id: fam.id, name: headName, password, is_head: true, last_seen: new Date().toISOString()
+  }).select().single();
+  if(e2) return {error:e2.message};
+  return { familyId: fam.id, memberId: mem.id, name: mem.name, role: 'head' };
+}
+async function loginUser(name, password){
+  const fam = DB.families.find(f=>f.name.toLowerCase()===name.toLowerCase() && String(f.password)===String(password));
+  if(fam){
+    const head = DB.members.find(m=>m.family_id===fam.id && m.is_head);
+    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', head.id);
+    return { familyId: fam.id, memberId: head.id, name: head.name, role:'head' };
+  }
+  const mem = DB.members.find(m=>m.name.toLowerCase()===name.toLowerCase() && String(m.password)===String(password) && !m.is_head);
+  if(mem){
+    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', mem.id);
+    return { familyId: mem.family_id, memberId: mem.id, name: mem.name, role:'member' };
+  }
+  return {error:'No match found.'};
+}
+async function addMember(familyId, name, password){
+  if(nameTaken(name)) return {error:'That name is already used by someone else.'};
+  const { data, error } = await sb.from('members').insert({family_id: familyId, name, password, is_head:false}).select().single();
+  if(error) return {error:error.message};
+  return {id:data.id, name:data.name};
+}
+async function editMemberName(memberId, newName){
+  if(nameTaken(newName, memberId)) return {error:'That name is already used by someone else.'};
+  const { error } = await sb.from('members').update({name:newName}).eq('id', memberId);
+  if(error) return {error:error.message};
+  return {ok:true};
+}
+async function createEventRow(gDate, deadline){
+  const { error } = await sb.from('events').insert({g_date: gDate, deadline, status:'open'});
+  if(error) return {error:error.message};
+  return {ok:true};
+}
+async function toggleEventRow(eventId){
+  const ev = DB.events.find(e=>e.id===eventId);
+  const { error } = await sb.from('events').update({status: ev.status==='closed'?'open':'closed'}).eq('id', eventId);
+  if(error) return {error:error.message};
+  return {ok:true};
+}
+async function castVoteRow(eventId, memberId, meal, response, submittedBy){
+  const { error } = await sb.from('votes').upsert({
+    event_id: eventId, member_id: memberId, meal, response, submitted_by: submittedBy, updated_at: new Date().toISOString()
+  }, { onConflict: 'event_id,member_id,meal' });
+  if(error) return {error:error.message};
+  const ev = DB.events.find(e=>e.id===eventId);
+  const dateLabel = ev ? new Date(ev.g_date).toDateString() : '';
+  await addNotification(memberId, `Your ${meal} RSVP for ${dateLabel} was set to ${response}.`);
+  sendPush(memberId, `Your ${meal} RSVP for ${dateLabel} was set to ${response}.`);
+  return {ok:true};
+}
+async function sendChatMessage(fromId, toId, text){
+  const { error } = await sb.from('messages').insert({from_id: fromId, to_id: toId, text});
+  if(error) return {error:error.message};
+  const sender = findMember(fromId);
+  await addNotification(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`);
+  sendPush(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`);
+  return {ok:true};
+}
+async function markMessagesRead(fromId, toId){
+  await sb.from('messages').update({read_at: new Date().toISOString()})
+    .eq('from_id', fromId).eq('to_id', toId).is('read_at', null);
+}
+async function sendReminderRow(eventId){
+  const ev = DB.events.find(e=>e.id===eventId);
+  const dateLabel = ev ? new Date(ev.g_date).toDateString() : '';
+  let count = 0;
+  for(const m of DB.members){
+    const voted = DB.votes.some(v=>v.event_id===eventId && v.member_id===m.id);
+    if(!voted){
+      await addNotification(m.id, `Reminder: please RSVP for ${dateLabel} before ${new Date(ev.deadline).toLocaleString()}.`);
+      sendPush(m.id, `Reminder: please RSVP for ${dateLabel}.`);
+      count++;
     }
-  });
+  }
+  return {count};
 }
-function enableNotifications(){
-  OneSignalDeferred.push(async function(OneSignal){
-    await OneSignal.Notifications.requestPermission();
-    alert(OneSignal.Notifications.permission === true ? 'Notifications enabled!' : 'Notifications are still blocked. Check your browser/site settings.');
-  });
+async function broadcastMessage(text){
+  const { error } = await sb.from('messages').insert({ from_id: null, to_id: null, text, is_broadcast: true, sender_label:'Admin' });
+  if(error) return {error:error.message};
+  for(const m of DB.members) await addNotification(m.id, `[Admin] ${text}`);
+  sendPush('ALL', `[Admin] ${text}`);
+  return {ok:true, count: DB.members.length};
+}
+async function markNotifsRead(memberId){
+  await sb.from('notifications').update({read:true}).eq('member_id', memberId).eq('read', false);
+}
+async function heartbeat(){
+  if(session && session.memberId!=='ADMIN'){
+    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', session.memberId);
+  }
 }
 
-/* ================= Render root ================= */
-function saveSession(){
-  try{ localStorage.setItem('saifees_session', JSON.stringify(session)); }catch(e){}
+/* ================= Realtime ================= */
+function setupRealtime(){
+  sb.channel('public:all-changes')
+    .on('postgres_changes', {event:'*', schema:'public', table:'messages'}, async ()=>{ await refreshQuiet(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'notifications'}, async ()=>{ await refreshQuiet(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'votes'}, async ()=>{ await refreshQuiet(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'events'}, async ()=>{ await refreshQuiet(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'members'}, async ()=>{ await refreshQuiet(); })
+    .subscribe();
 }
-function loadSession(){
-  try{ const s = localStorage.getItem('saifees_session'); return s ? JSON.parse(s) : null; }catch(e){ return null; }
+async function refreshQuiet(){
+  try{ await loadAll(); render(); }catch(e){ console.error(e); }
 }
-function clearSession(){
-  try{ localStorage.removeItem('saifees_session'); }catch(e){}
-}
+
+/* ================= Boot / render root ================= */
 async function boot(){
-  session = loadSession(); // instant: restore login without waiting on the network
-  render(); // paint immediately with whatever we have (empty DB is fine — calendar grid still works)
-  try {
-    DB = await callApi('getAll', {});
-    render(); // re-render once real data arrives
+  session = loadSession();
+  render();
+  try{
+    await loadAll();
+    render();
+    setupRealtime();
     if(session) registerPushForMember(session.memberId);
-  } catch(e) {
+    if(heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(heartbeat, 60000);
+  }catch(e){
     const main = document.getElementById('main');
     if(main) main.insertAdjacentHTML('afterbegin', `
       <div class="card" style="border:1px solid #E8703A;">
@@ -242,6 +330,30 @@ async function boot(){
       </div>`);
   }
 }
+function registerPushForMember(memberId){
+  window.__pendingExternalId = memberId;
+  OneSignalDeferred.push(async function(OneSignal){
+    await OneSignal.login(memberId);
+    if (OneSignal.Notifications.permission !== true) await OneSignal.Notifications.requestPermission();
+  });
+}
+function enableNotifications(){
+  OneSignalDeferred.push(async function(OneSignal){
+    await OneSignal.Notifications.requestPermission();
+    alert(OneSignal.Notifications.permission === true ? 'Notifications enabled!' : 'Notifications are still blocked. Check your browser/site settings.');
+  });
+}
+
+function unreadMessageCount(){
+  if(!session || session.role==='admin') return 0;
+  return DB.messages.filter(m=>!m.is_broadcast && m.to_id===session.memberId && !m.read_at).length;
+}
+function unreadAnnouncementCount(){
+  if(!session) return 0;
+  const lastSeen = localStorage.getItem('ann_seen_'+session.memberId) || '1970-01-01';
+  return DB.messages.filter(m=>m.is_broadcast && new Date(m.sent_at) > new Date(lastSeen)).length;
+}
+
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -255,7 +367,7 @@ function render(){
       <div style="display:flex;align-items:center;gap:14px;">
         ${session && session.role!=='admin' ? `<a class="link" style="color:#fff;" onclick="enableNotifications()">🔔 Enable</a>` : ''}
         ${session && session.role!=='admin' ? bellHtml() : ''}
-        ${session ? `<a class="link" style="color:#fff;" onclick="logout()">Logout</a>` : ''}
+        ${session ? `<a class="link" style="color:#fff;" onclick="doLogout()">Logout</a>` : ''}
       </div>
     </header>
     <main id="main"></main>
@@ -270,38 +382,40 @@ function render(){
   else if(activeTab==='admin') renderAdmin();
 }
 function bellHtml(){
-  const list = DB.notifications.filter(n=>n.memberId===session.memberId).sort((a,b)=>new Date(b.at)-new Date(a.at));
-  const unread = list.filter(n=>n.read!==true && n.read!=='TRUE').length;
+  const list = DB.notifications.filter(n=>n.member_id===session.memberId);
+  const unread = list.filter(n=>!n.read).length;
   return `<div class="bell" onclick="toggleNotif()">🔔${unread?`<span class="dot">${unread}</span>`:''}</div>`;
 }
 async function toggleNotif(){
   notifOpen = !notifOpen;
-  if(notifOpen){ await callApi('markNotifRead', {memberId: session.memberId}); await loadDB(); }
+  if(notifOpen){ await markNotifsRead(session.memberId); await loadAll(); }
   render();
 }
 function renderNotifPanel(){
   const main = document.getElementById('main');
-  const list = DB.notifications.filter(n=>n.memberId===session.memberId).sort((a,b)=>new Date(b.at)-new Date(a.at));
+  const list = DB.notifications.filter(n=>n.member_id===session.memberId).sort((a,b)=>new Date(b.at)-new Date(a.at));
   main.innerHTML = `<div class="card"><h2>Notifications</h2>
     <a class="link" onclick="toggleNotif()">&larr; Back</a><div style="height:8px;"></div>
     ${list.length? list.map(n=>`<div class="notif-item">${escapeHtml(n.text)}<div class="muted">${new Date(n.at).toLocaleString()}</div></div>`).join('') : '<div class="muted">No notifications yet.</div>'}
   </div>`;
 }
 function tabbarHtml(){
+  const msgBadge = unreadMessageCount() + unreadAnnouncementCount();
   const tabs = [
     {id:'calendar', icon:'📅', label:'Calendar'},
     {id:'vote', icon:'✅', label:'Vote'},
     {id:'presence', icon:'👥', label:'Presence'},
-    {id:'messages', icon:'💬', label:'Messages'},
+    {id:'messages', icon:'💬', label:'Messages', badge: msgBadge},
   ];
   if(session.role==='admin') tabs.push({id:'admin', icon:'⚙️', label:'Admin'});
   return `<div class="tabbar">${tabs.map(t=>`
     <button class="${activeTab===t.id?'active':''}" onclick="setTab('${t.id}')">
       <span class="tabicon">${t.icon}</span>${t.label}
+      ${t.badge?`<span class="tabbadge">${t.badge}</span>`:''}
     </button>`).join('')}</div>`;
 }
-async function setTab(t){ activeTab=t; notifOpen=false; await loadDB(); render(); }
-function logout(){ session=null; clearSession(); activeTab='calendar'; render(); }
+async function setTab(t){ activeTab=t; notifOpen=false; await loadAll(); render(); }
+function doLogout(){ session=null; clearSession(); activeTab='calendar'; render(); }
 
 /* ================= AUTH ================= */
 let authMode = 'login';
@@ -340,51 +454,35 @@ async function doRegisterFamily(){
   const headName = document.getElementById('regHeadName').value.trim();
   const password = document.getElementById('regPass').value;
   if(!name || !headName || !password) return alert('Please fill all fields.');
-  try{
-    const res = await callApi('registerFamily', {name, headName, password});
-    if(res.error) return alert(res.error);
-    session = {role:'head', familyId:res.familyId, memberId:res.memberId, name:res.name};
-    saveSession();
-    registerPushForMember(res.memberId);
-    await loadDB();
-    authMode='login';
-    render();
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await registerFamily(name, headName, password);
+  if(res.error) return alert(res.error);
+  session = {role:'head', familyId:res.familyId, memberId:res.memberId, name:res.name};
+  saveSession();
+  registerPushForMember(res.memberId);
+  await loadAll();
+  authMode='login';
+  render();
 }
 async function doLogin(){
   const name = document.getElementById('loginName').value.trim();
   const password = document.getElementById('loginPass').value;
-  try{
-    const res = await callApi('login', {name, password});
-    if(res.error) return alert(res.error);
-    session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name};
-    saveSession();
-    registerPushForMember(res.memberId);
-    await loadDB();
-    render();
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await loginUser(name, password);
+  if(res.error) return alert(res.error);
+  session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name};
+  saveSession();
+  registerPushForMember(res.memberId);
+  await loadAll();
+  render();
 }
 async function doAdminLogin(){
   const pass = document.getElementById('adminPass').value;
   if(pass !== ADMIN_PASSCODE) return alert('Incorrect passcode.');
   session = {role:'admin', name:'Super Admin', memberId:'ADMIN'};
   saveSession();
-  await loadDB();
+  await loadAll();
   render();
 }
 
-function shiftHijriMonth(delta){
-  hijriViewM += delta;
-  if(hijriViewM > 12){ hijriViewM = 1; hijriViewY++; }
-  if(hijriViewM < 1){ hijriViewM = 12; hijriViewY--; }
-  render();
-}
-function goToTodayHijri(){
-  const now = new Date();
-  const h = gregorianToHijri(now.getFullYear(), now.getMonth()+1, now.getDate());
-  hijriViewY = h.hy; hijriViewM = h.hm;
-  render();
-}
 /* ================= CALENDAR ================= */
 function renderCalendar(){
   const main = document.getElementById('main');
@@ -396,7 +494,6 @@ function renderCalendar(){
   const monthLabel = `${HIJRI_MONTHS[hijriViewM-1].toUpperCase()} - ${hijriViewY}`;
   const monthStart = findHijriMonthStart(hijriViewY, hijriViewM);
 
-  // find length of this hijri month by walking forward until the hijri month/year changes
   let length = 0;
   let walker = new Date(monthStart);
   while(true){
@@ -404,28 +501,12 @@ function renderCalendar(){
     if(h.hy===hijriViewY && h.hm===hijriViewM){ length++; walker.setDate(walker.getDate()+1); }
     else break;
   }
-
   const firstDow = monthStart.getDay();
   const cells = [];
-  // leading days (previous hijri month, greyed)
-  for(let i=firstDow; i>=1; i--){
-    const dt = new Date(monthStart); dt.setDate(dt.getDate()-i);
-    cells.push({date:dt, grey:true});
-  }
-  // this month's days
-  for(let d=0; d<length; d++){
-    const dt = new Date(monthStart); dt.setDate(dt.getDate()+d);
-    cells.push({date:dt, grey:false});
-  }
-  // trailing days (next hijri month, greyed) to complete the grid
-  const remainder = cells.length % 7;
-  if(remainder !== 0){
-    const extra = 7 - remainder;
-    for(let i=0;i<extra;i++){
-      const dt = new Date(monthStart); dt.setDate(dt.getDate()+length+i);
-      cells.push({date:dt, grey:true});
-    }
-  }
+  for(let i=firstDow;i>=1;i--){ const dt=new Date(monthStart); dt.setDate(dt.getDate()-i); cells.push({date:dt,grey:true}); }
+  for(let d=0; d<length; d++){ const dt=new Date(monthStart); dt.setDate(dt.getDate()+d); cells.push({date:dt,grey:false}); }
+  const rem = cells.length % 7;
+  if(rem!==0){ const extra=7-rem; for(let i=0;i<extra;i++){ const dt=new Date(monthStart); dt.setDate(dt.getDate()+length+i); cells.push({date:dt,grey:true}); } }
 
   let cellsHtml = cells.map(c=>{
     const date = c.date;
@@ -433,15 +514,11 @@ function renderCalendar(){
     const key = ymdKey(date);
     const isToday = ymdKey(now)===key;
     const isPast = date < new Date(now.getFullYear(),now.getMonth(),now.getDate());
-    const ev = DB.events.find(e=>e.gDate && ymdKey(new Date(e.gDate))===key);
+    const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===key);
     let cls = 'calday';
-    if(isToday) cls+=' today';
-    else if(ev) cls+=' event';
-    else if(isPast && !c.grey) cls+=' past';
+    if(isToday) cls+=' today'; else if(ev) cls+=' event'; else if(isPast && !c.grey) cls+=' past';
     if(c.grey) cls+=' greyday';
-    const gLabel = date.getDate()===1
-      ? `${date.getDate()} ${date.toLocaleString('en',{month:'short'})}`
-      : `${date.getDate()}`;
+    const gLabel = date.getDate()===1 ? `${date.getDate()} ${date.toLocaleString('en',{month:'short'})}` : `${date.getDate()}`;
     return `<div class="${cls}" ${ev?`onclick="openEventDetail('${ev.id}')"`:''} style="${ev?'cursor:pointer':''}">
       <div class="h">${toArabicNum(h.hd)}</div>
       <div class="g">${gLabel}</div>
@@ -452,9 +529,9 @@ function renderCalendar(){
   main.innerHTML = `
     <div class="card">
       <div class="row" style="margin-bottom:8px;">
-        <button class="btn-secondary btn-small" onclick="shiftHijriMonth(-1)">&larr; Prev</button>
-        <button class="btn-secondary btn-small" onclick="goToTodayHijri()">Today</button>
-        <button class="btn-secondary btn-small" onclick="shiftHijriMonth(1)">Next &rarr;</button>
+        <button class="btn-secondary btn-small" onclick="hijriViewM--;if(hijriViewM<1){hijriViewM=12;hijriViewY--;}render()">&larr; Prev</button>
+        <button class="btn-secondary btn-small" onclick="hijriViewY=null;render()">Today</button>
+        <button class="btn-secondary btn-small" onclick="hijriViewM++;if(hijriViewM>12){hijriViewM=1;hijriViewY++;}render()">Next &rarr;</button>
       </div>
       <div class="calhead">${monthLabel}<div style="font-size:19px;margin-top:4px;font-family:'FatemiQanz','Segoe UI',sans-serif;" dir="rtl">${HIJRI_MONTHS_AR[hijriViewM-1]}</div></div>
       <div class="calgrid">
@@ -468,11 +545,11 @@ function renderCalendar(){
 }
 function openEventDetail(eventId){
   const ev = DB.events.find(e=>e.id===eventId);
-  const votes = DB.votes.filter(v=>v.eventId===eventId);
+  const votes = DB.votes.filter(v=>v.event_id===eventId);
   const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
   document.getElementById('eventDetail').innerHTML = `
     <div class="card">
-      <h2>${new Date(ev.gDate).toDateString()} — ${ev.status==='closed'?'Closed':'Open'} (deadline ${new Date(ev.deadline).toLocaleString()})</h2>
+      <h2>${new Date(ev.g_date).toDateString()} — ${ev.status==='closed'?'Closed':'Open'} (deadline ${new Date(ev.deadline).toLocaleString()})</h2>
       <div class="row">
         <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
         <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
@@ -482,10 +559,9 @@ function openEventDetail(eventId){
 }
 function adminFamilyBreakdown(eventId){
   const rows = DB.families.map(f=>{
-    const memberIds = membersOfFamily(f.id).map(m=>m.id);
-    const v = DB.votes.filter(x=>x.eventId===eventId && memberIds.includes(x.memberId));
-    const yes = v.filter(x=>x.response==='Yes').length;
-    const no = v.filter(x=>x.response==='No').length;
+    const ids = membersOfFamily(f.id).map(m=>m.id);
+    const v = DB.votes.filter(x=>x.event_id===eventId && ids.includes(x.member_id));
+    const yes = v.filter(x=>x.response==='Yes').length, no = v.filter(x=>x.response==='No').length;
     return `<div class="memberrow"><span>${escapeHtml(f.name)}</span><span class="muted">Yes ${yes} / No ${no}</span></div>`;
   }).join('');
   return `<div style="margin-top:10px;"><b class="muted">By family</b>${rows}</div>`;
@@ -500,27 +576,46 @@ function renderVote(){
   }
   const openEvents = DB.events.filter(e=>e.status!=='closed' && new Date(e.deadline) > new Date());
   const closedEvents = DB.events.filter(e=>e.status==='closed' || new Date(e.deadline) <= new Date());
+  const myFamilyMembers = membersOfFamily(session.familyId);
   main.innerHTML = `
+    <div class="card">
+      <h2>My family members</h2>
+      ${myFamilyMembers.map(m=>`<div class="memberrow"><span>${escapeHtml(m.name)}${m.is_head?' <span class="muted">(head)</span>':''}</span></div>`).join('')}
+      <div class="row" style="margin-top:8px;">
+        <input id="newMemberName" placeholder="Add family member name">
+        <input id="newMemberPass" type="password" placeholder="Their password (optional)">
+      </div>
+      <button class="btn-secondary" onclick="doAddMember()">+ Add member</button>
+    </div>
     <div class="card">
       <h2>Open events</h2>
       ${openEvents.length? openEvents.map(e=>`
         <div class="memberrow">
-          <span>${new Date(e.gDate).toDateString()}<br><span class="muted">Deadline: ${new Date(e.deadline).toLocaleString()}</span></span>
+          <span>${new Date(e.g_date).toDateString()}<br><span class="muted">Deadline: ${new Date(e.deadline).toLocaleString()}</span></span>
           <button class="btn-primary btn-small" onclick="openVoteGrid('${e.id}')">Vote</button>
         </div>`).join('') : '<div class="muted">No open events right now.</div>'}
     </div>
     <div id="voteGrid"></div>
     <div class="card">
       <h2>Past / closed events</h2>
-      ${closedEvents.length? closedEvents.map(e=>`<div class="memberrow"><span>${new Date(e.gDate).toDateString()}</span><span class="muted">Closed</span></div>`).join('') : '<div class="muted">None yet.</div>'}
+      ${closedEvents.length? closedEvents.map(e=>`<div class="memberrow"><span>${new Date(e.g_date).toDateString()}</span><span class="muted">Closed</span></div>`).join('') : '<div class="muted">None yet.</div>'}
     </div>
   `;
+}
+async function doAddMember(){
+  const name = document.getElementById('newMemberName').value.trim();
+  const pass = document.getElementById('newMemberPass').value.trim();
+  if(!name) return alert('Enter a name.');
+  const res = await addMember(session.familyId, name, pass);
+  if(res.error) return alert(res.error);
+  await loadAll();
+  renderVote();
 }
 function openVoteGrid(eventId){
   const fam = membersOfFamily(session.familyId);
   const rows = fam.map(m=>{
-    const lv = DB.votes.find(v=>v.eventId===eventId && v.memberId===m.id && v.meal==='Lunch');
-    const dv = DB.votes.find(v=>v.eventId===eventId && v.memberId===m.id && v.meal==='Dinner');
+    const lv = DB.votes.find(v=>v.event_id===eventId && v.member_id===m.id && v.meal==='Lunch');
+    const dv = DB.votes.find(v=>v.event_id===eventId && v.member_id===m.id && v.meal==='Dinner');
     return `<div class="memberrow">
       <span>${escapeHtml(m.name)}</span>
       <span class="row" style="gap:4px;">
@@ -531,35 +626,33 @@ function openVoteGrid(eventId){
       </span>
     </div>`;
   }).join('');
-  document.getElementById('voteGrid').innerHTML = `<div class="card"><h2>${new Date(DB.events.find(e=>e.id===eventId).gDate).toDateString()}</h2>${rows}</div>`;
+  document.getElementById('voteGrid').innerHTML = `<div class="card"><h2>${new Date(DB.events.find(e=>e.id===eventId).g_date).toDateString()}</h2>${rows}</div>`;
 }
 async function castVote(eventId, memberId, meal, response){
   const ev = DB.events.find(e=>e.id===eventId);
   if(new Date(ev.deadline) <= new Date() || ev.status==='closed'){ alert('Voting is closed for this date.'); return; }
-  try{
-    await callApi('castVote', {eventId, memberId, meal, response, submittedBy: session.memberId});
-    await loadDB();
-    openVoteGrid(eventId);
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await castVoteRow(eventId, memberId, meal, response, session.memberId);
+  if(res.error) return alert(res.error);
+  await loadAll();
+  openVoteGrid(eventId);
 }
 
 /* ================= PRESENCE ================= */
 function renderPresence(){
   const main = document.getElementById('main');
-  const latestEvent = [...DB.events].sort((a,b)=>new Date(b.gDate)-new Date(a.gDate))[0];
-  const famName = id => (DB.families.find(f=>f.id===id)||{}).name || '';
+  const latestEvent = [...DB.events].sort((a,b)=>new Date(b.g_date)-new Date(a.g_date))[0];
   const rows = DB.members.map(m=>{
-    const online = m.lastSeen && (new Date() - new Date(m.lastSeen)) < 5*60*1000;
+    const online = m.last_seen && (new Date() - new Date(m.last_seen)) < 2*60*1000;
     let votedTxt = '—';
     if(latestEvent){
-      const voted = DB.votes.some(v=>v.eventId===latestEvent.id && v.memberId===m.id);
+      const voted = DB.votes.some(v=>v.event_id===latestEvent.id && v.member_id===m.id);
       votedTxt = voted ? 'Voted' : 'Not voted yet';
     }
     return `<div class="memberrow">
-      <span>${escapeHtml(m.name)}<br><span class="muted">${famName(m.familyId)}</span></span>
+      <span>${escapeHtml(m.name)}<br><span class="muted">${famName(m.family_id)}</span></span>
       <span style="text-align:right;">
         <div class="pill ${online?'on':''}" style="display:inline-block;">${online?'Online':'Offline'}</div>
-        <div class="muted">${online?'':'Last seen '+(m.lastSeen? new Date(m.lastSeen).toLocaleString():'never')}</div>
+        <div class="muted">${online?'':'Last seen '+(m.last_seen? new Date(m.last_seen).toLocaleString():'never')}</div>
         <div class="muted">${votedTxt}</div>
       </span>
     </div>`;
@@ -568,52 +661,107 @@ function renderPresence(){
 }
 
 /* ================= MESSAGES ================= */
-let msgWith = null;
 function renderMessages(){
   const main = document.getElementById('main');
-  const famName = id => (DB.families.find(f=>f.id===id)||{}).name || '';
-  const others = DB.members.filter(m=>m.id!==session.memberId);
   main.innerHTML = `
+    <div class="subtabs">
+      <button class="btn-secondary ${msgSubTab==='chats'?'active':''}" onclick="msgSubTab='chats';msgWith=null;render()">Chats</button>
+      <button class="btn-secondary ${msgSubTab==='announcements'?'active':''}" onclick="openAnnouncements()">Announcements ${unreadAnnouncementCount()?`<span class="unreadbadge">${unreadAnnouncementCount()}</span>`:''}</button>
+    </div>
+    <div id="msgBody"></div>
+  `;
+  if(msgSubTab==='chats') renderChatsSubtab();
+  else renderAnnouncementsSubtab();
+}
+function openAnnouncements(){
+  msgSubTab = 'announcements';
+  if(session) localStorage.setItem('ann_seen_'+session.memberId, new Date().toISOString());
+  render();
+}
+function renderAnnouncementsSubtab(){
+  const list = DB.messages.filter(m=>m.is_broadcast).sort((a,b)=>new Date(b.sent_at)-new Date(a.sent_at));
+  document.getElementById('msgBody').innerHTML = `
     <div class="card">
-      <h2>Contacts</h2>
-      ${others.map(m=>`<div class="memberrow"><span>${escapeHtml(m.name)} <span class="muted">(${famName(m.familyId)})</span></span>
-        <button class="btn-secondary btn-small" onclick="openChat('${m.id}')">Message</button></div>`).join('') || '<div class="muted">No other members yet.</div>'}
+      <h2>Announcements</h2>
+      ${list.length? list.map(m=>`
+        <div class="notif-item"><b>${escapeHtml(m.sender_label||'Admin')}</b>: ${escapeHtml(m.text)}
+          <div class="muted">${new Date(m.sent_at).toLocaleString()}</div>
+        </div>`).join('') : '<div class="muted">No announcements yet.</div>'}
+    </div>`;
+}
+function renderChatsSubtab(){
+  const others = DB.members.filter(m=>m.id!==session.memberId);
+  const convos = others.map(m=>{
+    const thread = DB.messages.filter(x=>!x.is_broadcast &&
+      ((x.from_id===session.memberId && x.to_id===m.id) || (x.from_id===m.id && x.to_id===session.memberId)));
+    const last = thread.sort((a,b)=>new Date(b.sent_at)-new Date(a.sent_at))[0];
+    const unread = thread.filter(x=>x.to_id===session.memberId && !x.read_at).length;
+    return { member:m, last, unread };
+  }).sort((a,b)=>{
+    if(!a.last && !b.last) return 0;
+    if(!a.last) return 1;
+    if(!b.last) return -1;
+    return new Date(b.last.sent_at) - new Date(a.last.sent_at);
+  });
+  const body = document.getElementById('msgBody');
+  body.innerHTML = `
+    <div class="card">
+      <h2>Chats</h2>
+      ${convos.map(c=>`
+        <div class="convo" onclick="openChat('${c.member.id}')">
+          <span>${escapeHtml(c.member.name)} <span class="muted">(${famName(c.member.family_id)})</span>
+            <div class="preview">${c.last? escapeHtml(c.last.text) : 'No messages yet'}</div>
+          </span>
+          ${c.unread? `<span class="unreadbadge">${c.unread}</span>` : ''}
+        </div>`).join('') || '<div class="muted">No other members yet.</div>'}
     </div>
     <div id="chatBox"></div>
   `;
   if(msgWith) openChat(msgWith);
 }
-function openChat(memberId){
+async function openChat(memberId){
   msgWith = memberId;
   const other = findMember(memberId);
-  const thread = DB.messages.filter(m =>
-    (m.from===session.memberId && m.to===memberId) || (m.from===memberId && m.to===session.memberId)
-  ).sort((a,b)=>new Date(a.sentAt)-new Date(b.sentAt));
-  document.getElementById('chatBox').innerHTML = `
+  await markMessagesRead(memberId, session.memberId);
+  await loadAll();
+  const thread = DB.messages.filter(m => !m.is_broadcast &&
+    ((m.from_id===session.memberId && m.to_id===memberId) || (m.from_id===memberId && m.to_id===session.memberId))
+  ).sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at));
+  const chatBox = document.getElementById('chatBox');
+  if(!chatBox) { renderChatsSubtab(); return; }
+  chatBox.innerHTML = `
     <div class="card">
       <h2>Chat with ${escapeHtml(other.name)}</h2>
-      <div style="max-height:220px;overflow-y:auto;margin-bottom:10px;">
-        ${thread.map(m=>`<div class="msgline ${m.from===session.memberId?'msg-me':'msg-them'}">${escapeHtml(m.text)}</div>`).join('') || '<div class="muted">No messages yet.</div>'}
+      <div style="max-height:260px;overflow-y:auto;margin-bottom:10px;">
+        ${thread.map(m=>{
+          const mine = m.from_id===session.memberId;
+          const bubble = `<div class="msgline ${mine?'msg-me':'msg-them'}">${escapeHtml(m.text)}</div>`;
+          const seen = mine ? `<div class="seen">${m.read_at ? 'Seen at '+new Date(m.read_at).toLocaleTimeString() : 'Sent'}</div>` : '';
+          return bubble + seen;
+        }).join('') || '<div class="muted">No messages yet.</div>'}
       </div>
       <input id="chatInput" placeholder="Type a message...">
       <button class="btn-primary" onclick="sendMsg('${memberId}')">Send</button>
     </div>`;
+  renderTabBadgeOnly();
+}
+function renderTabBadgeOnly(){
+  const bar = document.querySelector('.tabbar');
+  if(bar) bar.outerHTML = tabbarHtml();
 }
 async function sendMsg(memberId){
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if(!text) return;
-  try{
-    await callApi('sendMessage', {from: session.memberId, to: memberId, text});
-    await loadDB();
-    openChat(memberId);
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await sendChatMessage(session.memberId, memberId, text);
+  if(res.error) return alert(res.error);
+  await loadAll();
+  openChat(memberId);
 }
 
 /* ================= ADMIN ================= */
 function renderAdmin(){
   const main = document.getElementById('main');
-  const famName = id => (DB.families.find(f=>f.id===id)||{}).name || '';
   main.innerHTML = `
     <div class="card">
       <h2>Create meal event</h2>
@@ -625,7 +773,7 @@ function renderAdmin(){
       <h2>All events</h2>
       ${DB.events.length? DB.events.map(e=>`
         <div class="memberrow">
-          <span>${new Date(e.gDate).toDateString()}<br><span class="muted">Deadline ${new Date(e.deadline).toLocaleString()} · ${e.status==='closed'?'Closed':'Open'}</span></span>
+          <span>${new Date(e.g_date).toDateString()}<br><span class="muted">Deadline ${new Date(e.deadline).toLocaleString()} · ${e.status==='closed'?'Closed':'Open'}</span></span>
           <span>
             <button class="btn-secondary btn-small" onclick="toggleEventStatus('${e.id}')">${e.status==='closed'?'Reopen':'Close'}</button>
             <button class="btn-secondary btn-small" onclick="sendReminders('${e.id}')">Remind</button>
@@ -636,12 +784,12 @@ function renderAdmin(){
       <h2>Edit member details</h2>
       ${DB.members.map(m=>`
         <div class="memberrow">
-          <span>${escapeHtml(m.name)} <span class="muted">(${famName(m.familyId)})</span></span>
-          <button class="btn-secondary btn-small" onclick="editMember('${m.id}')">Edit</button>
+          <span>${escapeHtml(m.name)} <span class="muted">(${famName(m.family_id)})</span></span>
+          <button class="btn-secondary btn-small" onclick="editMemberPrompt('${m.id}')">Edit</button>
         </div>`).join('')}
     </div>
     <div class="card">
-      <h2>Broadcast message to everyone</h2>
+      <h2>Broadcast announcement to everyone</h2>
       <input id="broadcastText" placeholder="Message to all members">
       <button class="btn-primary" onclick="sendBroadcast()">Send to all</button>
     </div>
@@ -651,40 +799,36 @@ async function createEvent(){
   const d = document.getElementById('evDate').value;
   const dl = document.getElementById('evDeadline').value;
   if(!d || !dl) return alert('Pick a date and deadline.');
-  try{ await callApi('createEvent', {gDate:d, deadline:dl}); await loadDB(); renderAdmin(); }
-  catch(e){ alert('Error: '+e.message); }
+  const res = await createEventRow(d, dl);
+  if(res.error) return alert(res.error);
+  await loadAll(); renderAdmin();
 }
 async function toggleEventStatus(eventId){
-  try{ await callApi('toggleEvent', {eventId}); await loadDB(); renderAdmin(); }
-  catch(e){ alert('Error: '+e.message); }
+  const res = await toggleEventRow(eventId);
+  if(res.error) return alert(res.error);
+  await loadAll(); renderAdmin();
 }
 async function sendReminders(eventId){
-  try{
-    const res = await callApi('sendReminders', {eventId});
-    alert(`Reminder sent to ${res.count} member(s) who haven't voted.`);
-    await loadDB();
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await sendReminderRow(eventId);
+  alert(`Reminder sent to ${res.count} member(s) who haven't voted.`);
+  await loadAll();
 }
-async function editMember(memberId){
+async function editMemberPrompt(memberId){
   const m = findMember(memberId);
   const newName = prompt('Edit name for '+m.name, m.name);
   if(newName===null || !newName.trim()) return;
-  try{
-    const res = await callApi('editMember', {memberId, newName: newName.trim()});
-    if(res.error) return alert(res.error);
-    await loadDB();
-    renderAdmin();
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await editMemberName(memberId, newName.trim());
+  if(res.error) return alert(res.error);
+  await loadAll(); renderAdmin();
 }
 async function sendBroadcast(){
   const text = document.getElementById('broadcastText').value.trim();
   if(!text) return;
-  try{
-    const res = await callApi('broadcast', {text});
-    alert('Broadcast sent to '+res.count+' member(s).');
-    document.getElementById('broadcastText').value='';
-    await loadDB();
-  }catch(e){ alert('Error: '+e.message); }
+  const res = await broadcastMessage(text);
+  if(res.error) return alert(res.error);
+  alert('Broadcast sent to '+res.count+' member(s).');
+  document.getElementById('broadcastText').value='';
+  await loadAll();
 }
 
 boot();
