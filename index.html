@@ -150,7 +150,7 @@ function findHijriMonthStart(hy, hm){
 }
 
 /* ================= State ================= */
-let DB = { families: [], members: [], events: [], votes: [], messages: [], notifications: [] };
+let DB = { families: [], members: [], events: [], votes: [], messages: [], notifications: [], reminders: [] };
 let session = null;
 let activeTab = 'calendar';
 let hijriViewY = null, hijriViewM = null;
@@ -176,8 +176,12 @@ async function loadAll(){
   if(fam.error) throw fam.error;
   DB = {
     families: fam.data||[], members: mem.data||[], events: ev.data||[],
-    votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[]
+    votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[], reminders: []
   };
+  if(session && session.role!=='admin' && session.memberId){
+    const { data } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
+    DB.reminders = data || [];
+  }
 }
 function nameTaken(name, exceptId){
   return DB.members.some(m => m.name.toLowerCase()===name.toLowerCase() && m.id!==exceptId);
@@ -518,14 +522,18 @@ function renderCalendar(){
     const isToday = ymdKey(now)===key;
     const isPast = date < new Date(now.getFullYear(),now.getMonth(),now.getDate());
     const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===key);
+    const hasReminder = DB.reminders.some(r=>ymdKey(new Date(r.remind_at))===key);
     let cls = 'calday';
     if(isToday) cls+=' today'; else if(ev) cls+=' event'; else if(isPast && !c.grey) cls+=' past';
     if(c.grey) cls+=' greyday';
     const gLabel = date.getDate()===1 ? `${date.getDate()} ${date.toLocaleString('en',{month:'short'})}` : `${date.getDate()}`;
-    return `<div class="${cls}" ${ev?`onclick="openEventDetail('${ev.id}')"`:''} style="${ev?'cursor:pointer':''}">
+    return `<div class="${cls}" onclick="openDayDetail('${key}')" style="cursor:pointer;">
       <div class="h">${toArabicNum(h.hd)}</div>
       <div class="g">${gLabel}</div>
-      ${ev?'<div class="dot"></div>':''}
+      <div class="row" style="gap:2px;justify-content:center;">
+        ${ev?'<div class="dot"></div>':''}
+        ${hasReminder?'<div class="dot" style="background:var(--teal);"></div>':''}
+      </div>
     </div>`;
   }).join('');
 
@@ -541,58 +549,85 @@ function renderCalendar(){
         ${['S','M','T','W','T','F','S'].map(d=>`<div class="caldow">${d}</div>`).join('')}
         ${cellsHtml}
       </div>
-      <div class="muted" style="margin-top:10px;">Tap a highlighted date to see totals. Orange dot = meal event scheduled. Greyed dates belong to the adjacent Hijri month.</div>
+      <div class="muted" style="margin-top:10px;">Tap any date to see meal totals or add a reminder. 🟠 orange dot = meal event · 🟢 teal dot = your reminder.</div>
     </div>
-    <div id="eventDetail"></div>
-    ${session.role!=='admin' ? `
-    <div class="card">
-      <h2>My reminders</h2>
-      <div id="reminderList" class="muted">Loading…</div>
-      <input id="reminderText" placeholder="Reminder text">
-      <input id="reminderWhen" type="datetime-local">
-      <button class="btn-primary" onclick="addReminder()">Add reminder</button>
-    </div>` : ''}
+    <div id="dayDetail"></div>
   `;
-  if(session.role!=='admin') loadReminders();
 }
-async function loadReminders(){
-  const { data, error } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
-  const list = document.getElementById('reminderList');
-  if(!list) return;
-  if(error){ list.innerHTML = `<span class="muted">Couldn't load reminders.</span>`; return; }
-  list.innerHTML = data.length ? data.map(r=>`
-    <div class="memberrow">
-      <span>${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleString()}${r.notified?' · sent':''}</span></span>
-      <button class="btn-secondary btn-small" onclick="deleteReminder('${r.id}')">Remove</button>
-    </div>`).join('') : '<div class="muted">No reminders yet.</div>';
-}
-async function addReminder(){
-  const text = document.getElementById('reminderText').value.trim();
-  const when = document.getElementById('reminderWhen').value;
-  if(!text || !when) return alert('Enter text and a date/time.');
-  const { error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: new Date(when).toISOString() });
-  if(error) return alert(error.message);
-  document.getElementById('reminderText').value='';
-  document.getElementById('reminderWhen').value='';
-  loadReminders();
-}
-async function deleteReminder(id){
-  await sb.from('reminders').delete().eq('id', id);
-  loadReminders();
-}
-function openEventDetail(eventId){
-  const ev = DB.events.find(e=>e.id===eventId);
-  const votes = DB.votes.filter(v=>v.event_id===eventId);
-  const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
-  document.getElementById('eventDetail').innerHTML = `
-    <div class="card">
-      <h2>${new Date(ev.g_date).toDateString()} — ${ev.status==='closed'?'Closed':'Open'} (deadline ${new Date(ev.deadline).toLocaleString()})</h2>
-      <div class="row">
-        <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
-        <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
+function openDayDetail(dateKey){
+  const [y,m,d] = dateKey.split('-').map(Number);
+  const date = new Date(y, m-1, d);
+  const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===dateKey);
+  const dayReminders = DB.reminders.filter(r=>ymdKey(new Date(r.remind_at))===dateKey);
+
+  let eventHtml = '';
+  if(ev){
+    const votes = DB.votes.filter(v=>v.event_id===ev.id);
+    const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
+    eventHtml = `
+      <div style="margin-bottom:14px;">
+        <b>Meal event</b> — ${ev.status==='closed'?'Closed':'Open'} (deadline ${new Date(ev.deadline).toLocaleString()})
+        <div class="row" style="margin-top:6px;">
+          <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
+          <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
+        </div>
+        ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}
+      </div>`;
+  }
+
+  const reminderSection = session.role!=='admin' ? `
+    <div>
+      <b>Reminders on this date</b>
+      <div id="dayReminderList">
+        ${dayReminders.length ? dayReminders.map(r=>`
+          <div class="memberrow">
+            <span>${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${r.repeat!=='none'?' · repeats '+r.repeat:''}${r.notified?' · sent':''}</span></span>
+            <button class="btn-secondary btn-small" onclick="deleteReminder('${r.id}','${dateKey}')">Remove</button>
+          </div>`).join('') : '<div class="muted">No reminders on this date yet.</div>'}
       </div>
-      ${session.role==='admin' ? adminFamilyBreakdown(eventId) : ''}
+      <div style="margin-top:10px;">
+        <input id="reminderText" placeholder="Reminder text">
+        <div class="row">
+          <input id="reminderTime" type="time" value="09:00">
+          <select id="reminderRepeat">
+            <option value="none">Does not repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <button class="btn-primary" onclick="addReminderForDate('${dateKey}')">Add reminder</button>
+      </div>
+    </div>` : '';
+
+  document.getElementById('dayDetail').innerHTML = `
+    <div class="card">
+      <h2>${date.toDateString()}</h2>
+      ${eventHtml}
+      ${reminderSection}
+      ${!ev && session.role==='admin' ? '<div class="muted">No meal event on this date.</div>' : ''}
     </div>`;
+}
+async function addReminderForDate(dateKey){
+  const text = document.getElementById('reminderText').value.trim();
+  const time = document.getElementById('reminderTime').value || '09:00';
+  const repeat = document.getElementById('reminderRepeat').value;
+  if(!text) return alert('Enter reminder text.');
+  const [y,m,d] = dateKey.split('-').map(Number);
+  const [hh,mm] = time.split(':').map(Number);
+  const remindAt = new Date(y, m-1, d, hh, mm).toISOString();
+  const { error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: remindAt, repeat });
+  if(error) return alert(error.message);
+  await loadAll();
+  renderCalendar();
+  openDayDetail(dateKey);
+}
+async function deleteReminder(id, dateKey){
+  await sb.from('reminders').delete().eq('id', id);
+  await loadAll();
+  renderCalendar();
+  openDayDetail(dateKey);
 }
 function adminFamilyBreakdown(eventId){
   const rows = DB.families.map(f=>{
