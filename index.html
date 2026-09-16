@@ -114,6 +114,15 @@
   .big-add-btn{background:linear-gradient(135deg,var(--orange),var(--orange-dark));color:#fff;font-weight:800;font-size:15px;padding:15px;border-radius:16px;width:100%;box-shadow:0 6px 16px rgba(232,112,58,.35);transition:transform .12s ease, box-shadow .12s ease;border:none;cursor:pointer;}
   .big-add-btn:active{transform:scale(.97);box-shadow:0 3px 8px rgba(232,112,58,.3);}
   .empty-hint{text-align:center;padding:18px 10px;color:var(--muted);font-size:13px;}
+  .notif-cta{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,var(--orange),var(--orange-dark));color:#fff;padding:11px 18px;border-radius:24px;font-weight:700;font-size:13px;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(232,112,58,.35);transition:transform .12s ease;}
+  .notif-cta:active{transform:scale(.96);}
+  .notif-cta .bell-ic{display:inline-block;font-size:16px;animation:bellRing 2.6s ease-in-out infinite;transform-origin:top center;}
+  @keyframes bellRing{
+    0%,75%,100%{transform:rotate(0deg);}
+    78%{transform:rotate(14deg);} 81%{transform:rotate(-11deg);} 84%{transform:rotate(8deg);}
+    87%{transform:rotate(-5deg);} 90%{transform:rotate(3deg);} 93%{transform:rotate(0deg);}
+  }
+  .notif-on{display:inline-flex;align-items:center;gap:8px;background:var(--teal-light);color:var(--teal-dark);padding:11px 18px;border-radius:24px;font-weight:700;font-size:13px;}
 </style>
 </head>
 <body>
@@ -371,10 +380,16 @@ function registerPushForMember(memberId){
   });
 }
 function enableNotifications(){
-  OneSignalDeferred.push(async function(OneSignal){
-    await OneSignal.Notifications.requestPermission();
-    alert(OneSignal.Notifications.permission === true ? 'Notifications enabled!' : 'Notifications are still blocked. Check your browser/site settings.');
-  });
+  if(window.OneSignal && OneSignal.Notifications){
+    OneSignal.Notifications.requestPermission().then(()=>{
+      render(); // refresh the button state
+      alert(OneSignal.Notifications.permission === true ? 'Notifications enabled! 🎉' : 'Notifications are blocked. Check your browser or phone settings to allow them for this site.');
+    }).catch(err=>{
+      alert('Something went wrong requesting permission: ' + err.message);
+    });
+  } else {
+    alert("Notifications are still loading — please wait a couple of seconds and tap the bell again.");
+  }
 }
 
 function unreadMessageCount(){
@@ -782,9 +797,12 @@ function renderPresence(){
 /* ================= MESSAGES ================= */
 function renderMessages(){
   const main = document.getElementById('main');
+  const permGranted = !!(window.OneSignal && OneSignal.Notifications && OneSignal.Notifications.permission === true);
   main.innerHTML = `
     <div class="row" style="margin-bottom:10px;">
-      <a class="link" onclick="enableNotifications()">🔔 Enable notifications</a>
+      ${permGranted
+        ? `<span class="notif-on">✅ Notifications on</span>`
+        : `<button class="notif-cta" onclick="enableNotifications()"><span class="bell-ic">🔔</span> Enable notifications</button>`}
     </div>
     <div class="subtabs">
       <button class="btn-secondary ${msgSubTab==='chats'?'active':''}" onclick="msgSubTab='chats';msgWith=null;render()">Chats</button>
