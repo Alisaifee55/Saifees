@@ -228,8 +228,20 @@ async function addNotification(memberId, text){
   await sb.from('notifications').insert({member_id: memberId, text});
 }
 async function sendPush(target, message){
-  try{ await sb.functions.invoke('send-push', { body: { target, message } }); }
-  catch(e){ console.error('push failed', e); }
+  try{
+    if(target === 'ALL'){
+      await sb.functions.invoke('send-push', { body: { target: 'ALL', message } });
+      return;
+    }
+    // target is a member_id — prefer their stored OneSignal subscription ID (reliable),
+    // fall back to external_id alias targeting if we don't have one yet.
+    const member = findMember(target);
+    if(member && member.onesignal_subscription_id){
+      await sb.functions.invoke('send-push', { body: { subscriptionIds: [member.onesignal_subscription_id], message } });
+    } else {
+      await sb.functions.invoke('send-push', { body: { target, message } });
+    }
+  }catch(e){ console.error('push failed', e); }
 }
 
 async function registerFamily(name, headName, password){
@@ -377,7 +389,16 @@ function registerPushForMember(memberId){
   OneSignalDeferred.push(async function(OneSignal){
     await OneSignal.login(memberId);
     if (OneSignal.Notifications.permission !== true) await OneSignal.Notifications.requestPermission();
+    await saveSubscriptionId(memberId);
   });
+}
+async function saveSubscriptionId(memberId){
+  try{
+    const subId = window.OneSignal && OneSignal.User && OneSignal.User.PushSubscription ? OneSignal.User.PushSubscription.id : null;
+    if(subId){
+      await sb.from('members').update({onesignal_subscription_id: subId}).eq('id', memberId);
+    }
+  }catch(e){ console.error('could not save subscription id', e); }
 }
 async function enableNotifications(){
   try{
@@ -388,6 +409,7 @@ async function enableNotifications(){
     const before = OneSignal.Notifications.permission;
     const result = await OneSignal.Notifications.requestPermission();
     const after = OneSignal.Notifications.permission;
+    if(session && session.memberId!=='ADMIN') await saveSubscriptionId(session.memberId);
     render();
     alert('Permission before: ' + before + '\nrequestPermission() result: ' + result + '\nPermission after: ' + after);
   }catch(err){
