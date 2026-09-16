@@ -66,8 +66,8 @@
   .calhead{background:var(--orange-light);border-radius:12px;padding:10px;text-align:center;font-weight:800;color:var(--orange-dark);letter-spacing:.5px;margin-bottom:12px;}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
-  .calday{border-radius:12px;padding:6px 2px 8px;min-height:58px;background:#fdfaf5;position:relative;}
-  .calday .h{font-size:22px;font-weight:700;color:var(--teal);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
+  .calday{border-radius:12px;padding:6px 2px 8px;min-height:70px;background:#fdfaf5;position:relative;}
+  .calday .h{font-size:32px;font-weight:700;color:var(--teal);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
   .calday .g{font-size:10px;color:var(--muted);margin-top:2px;}
   .calday.today{background:var(--orange-light);border:2px solid var(--orange);}
   .calday.today .h{color:var(--orange-dark);}
@@ -315,6 +315,10 @@ async function boot(){
   render();
   try{
     await loadAll();
+    // Clear stale sessions left over from the old Google Sheets backend (short IDs, not real UUIDs)
+    if(session && session.role!=='admin' && !DB.members.some(m=>m.id===session.memberId)){
+      session = null; clearSession();
+    }
     render();
     setupRealtime();
     if(session) registerPushForMember(session.memberId);
@@ -365,7 +369,6 @@ function render(){
         <div class="who">${session ? escapeHtml(session.name)+' · '+session.role : 'Not logged in'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
-        ${session && session.role!=='admin' ? `<a class="link" style="color:#fff;" onclick="enableNotifications()">🔔 Enable</a>` : ''}
         ${session && session.role!=='admin' ? bellHtml() : ''}
         ${session ? `<a class="link" style="color:#fff;" onclick="doLogout()">Logout</a>` : ''}
       </div>
@@ -541,7 +544,41 @@ function renderCalendar(){
       <div class="muted" style="margin-top:10px;">Tap a highlighted date to see totals. Orange dot = meal event scheduled. Greyed dates belong to the adjacent Hijri month.</div>
     </div>
     <div id="eventDetail"></div>
+    ${session.role!=='admin' ? `
+    <div class="card">
+      <h2>My reminders</h2>
+      <div id="reminderList" class="muted">Loading…</div>
+      <input id="reminderText" placeholder="Reminder text">
+      <input id="reminderWhen" type="datetime-local">
+      <button class="btn-primary" onclick="addReminder()">Add reminder</button>
+    </div>` : ''}
   `;
+  if(session.role!=='admin') loadReminders();
+}
+async function loadReminders(){
+  const { data, error } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
+  const list = document.getElementById('reminderList');
+  if(!list) return;
+  if(error){ list.innerHTML = `<span class="muted">Couldn't load reminders.</span>`; return; }
+  list.innerHTML = data.length ? data.map(r=>`
+    <div class="memberrow">
+      <span>${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleString()}${r.notified?' · sent':''}</span></span>
+      <button class="btn-secondary btn-small" onclick="deleteReminder('${r.id}')">Remove</button>
+    </div>`).join('') : '<div class="muted">No reminders yet.</div>';
+}
+async function addReminder(){
+  const text = document.getElementById('reminderText').value.trim();
+  const when = document.getElementById('reminderWhen').value;
+  if(!text || !when) return alert('Enter text and a date/time.');
+  const { error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: new Date(when).toISOString() });
+  if(error) return alert(error.message);
+  document.getElementById('reminderText').value='';
+  document.getElementById('reminderWhen').value='';
+  loadReminders();
+}
+async function deleteReminder(id){
+  await sb.from('reminders').delete().eq('id', id);
+  loadReminders();
 }
 function openEventDetail(eventId){
   const ev = DB.events.find(e=>e.id===eventId);
@@ -664,6 +701,9 @@ function renderPresence(){
 function renderMessages(){
   const main = document.getElementById('main');
   main.innerHTML = `
+    <div class="row" style="margin-bottom:10px;">
+      <a class="link" onclick="enableNotifications()">🔔 Enable notifications</a>
+    </div>
     <div class="subtabs">
       <button class="btn-secondary ${msgSubTab==='chats'?'active':''}" onclick="msgSubTab='chats';msgWith=null;render()">Chats</button>
       <button class="btn-secondary ${msgSubTab==='announcements'?'active':''}" onclick="openAnnouncements()">Announcements ${unreadAnnouncementCount()?`<span class="unreadbadge">${unreadAnnouncementCount()}</span>`:''}</button>
