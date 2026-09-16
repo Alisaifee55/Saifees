@@ -379,16 +379,19 @@ function registerPushForMember(memberId){
     if (OneSignal.Notifications.permission !== true) await OneSignal.Notifications.requestPermission();
   });
 }
-function enableNotifications(){
-  if(window.OneSignal && OneSignal.Notifications){
-    OneSignal.Notifications.requestPermission().then(()=>{
-      render(); // refresh the button state
-      alert(OneSignal.Notifications.permission === true ? 'Notifications enabled! 🎉' : 'Notifications are blocked. Check your browser or phone settings to allow them for this site.');
-    }).catch(err=>{
-      alert('Something went wrong requesting permission: ' + err.message);
-    });
-  } else {
-    alert("Notifications are still loading — please wait a couple of seconds and tap the bell again.");
+async function enableNotifications(){
+  try{
+    if(!window.OneSignal || !OneSignal.Notifications){
+      alert('The notification system hasn\'t finished loading yet.\n\nWait a few seconds and tap again. If this keeps happening every time, something on this network/browser (like a content or ad blocker) may be blocking cdn.onesignal.com from loading at all.');
+      return;
+    }
+    const before = OneSignal.Notifications.permission;
+    const result = await OneSignal.Notifications.requestPermission();
+    const after = OneSignal.Notifications.permission;
+    render();
+    alert('Permission before: ' + before + '\nrequestPermission() result: ' + result + '\nPermission after: ' + after);
+  }catch(err){
+    alert('Error requesting permission: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
