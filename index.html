@@ -90,10 +90,35 @@
   .subtabs{display:flex;gap:8px;margin-bottom:12px;}
   .subtabs button{flex:1;}
   .subtabs button.active{background:var(--teal);color:#fff;}
+  /* Reminder modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(30,25,18,.5);display:flex;align-items:flex-end;justify-content:center;z-index:100;opacity:0;transition:opacity .28s ease;backdrop-filter:blur(2px);}
+  .modal-backdrop.show{opacity:1;}
+  .modal-sheet{background:linear-gradient(180deg,#fff, #FEFBF6 60%);width:100%;max-width:520px;border-radius:26px 26px 0 0;padding:14px 22px 30px;transform:translateY(100%);transition:transform .38s cubic-bezier(.22,1.1,.36,1);box-shadow:0 -10px 40px rgba(0,0,0,.2);max-height:88vh;overflow-y:auto;position:relative;}
+  .modal-backdrop.show .modal-sheet{transform:translateY(0);}
+  .modal-handle{width:42px;height:5px;background:#E5DDD2;border-radius:3px;margin:0 auto 16px;}
+  .modal-close{position:absolute;top:14px;right:18px;font-size:22px;color:var(--muted);cursor:pointer;line-height:1;padding:4px;}
+  .modal-date-hero{display:flex;align-items:center;gap:12px;margin-bottom:18px;}
+  .modal-date-hero .datebox{background:var(--teal);color:#fff;border-radius:14px;padding:8px 14px;text-align:center;min-width:56px;}
+  .modal-date-hero .datebox .dnum{font-size:20px;font-weight:800;line-height:1;}
+  .modal-date-hero .datebox .dmon{font-size:10px;text-transform:uppercase;letter-spacing:.5px;opacity:.9;}
+  .modal-date-hero h2{margin:0;font-size:18px;}
+  .reminder-chip{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--teal-light);border-radius:16px;padding:12px 14px;margin-bottom:10px;animation:popIn .28s cubic-bezier(.22,1.1,.36,1) both;}
+  .reminder-chip .icon{font-size:18px;}
+  @keyframes popIn{from{opacity:0;transform:scale(.9) translateY(6px);}to{opacity:1;transform:scale(1) translateY(0);}}
+  .section-label{font-size:12px;font-weight:800;color:var(--teal-dark);text-transform:uppercase;letter-spacing:.6px;margin:18px 0 8px;}
+  .repeat-pills{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;}
+  .repeat-pill{padding:9px 15px;border-radius:22px;border:1.5px solid #E5DDD2;background:#fff;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .15s ease;}
+  .repeat-pill.active{background:var(--teal);color:#fff;border-color:var(--teal);transform:scale(1.06);box-shadow:0 3px 10px rgba(18,122,121,.3);}
+  .fancy-input{width:100%;padding:14px 16px;border-radius:14px;border:1.5px solid #E5DDD2;margin-bottom:12px;font-size:15px;background:#fff;transition:border-color .15s ease, box-shadow .15s ease;}
+  .fancy-input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px rgba(18,122,121,.15);}
+  .big-add-btn{background:linear-gradient(135deg,var(--orange),var(--orange-dark));color:#fff;font-weight:800;font-size:15px;padding:15px;border-radius:16px;width:100%;box-shadow:0 6px 16px rgba(232,112,58,.35);transition:transform .12s ease, box-shadow .12s ease;border:none;cursor:pointer;}
+  .big-add-btn:active{transform:scale(.97);box-shadow:0 3px 8px rgba(232,112,58,.3);}
+  .empty-hint{text-align:center;padding:18px 10px;color:var(--muted);font-size:13px;}
 </style>
 </head>
 <body>
 <div id="app"><div style="padding:40px;text-align:center;color:#8A8078;">Loading Saifee's Calendar…</div></div>
+<div id="modalRoot"></div>
 
 <script>
 /* =========== CONFIG =========== */
@@ -421,7 +446,7 @@ function tabbarHtml(){
       ${t.badge?`<span class="tabbadge">${t.badge}</span>`:''}
     </button>`).join('')}</div>`;
 }
-async function setTab(t){ activeTab=t; notifOpen=false; await loadAll(); render(); }
+async function setTab(t){ activeTab=t; notifOpen=false; closeDayModal(); await loadAll(); render(); }
 function doLogout(){ session=null; clearSession(); activeTab='calendar'; render(); }
 
 /* ================= AUTH ================= */
@@ -551,10 +576,13 @@ function renderCalendar(){
       </div>
       <div class="muted" style="margin-top:10px;">Tap any date to see meal totals or add a reminder. 🟠 orange dot = meal event · 🟢 teal dot = your reminder.</div>
     </div>
-    <div id="dayDetail"></div>
   `;
 }
+let selectedRepeat = 'none';
+const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 function openDayDetail(dateKey){
+  selectedRepeat = 'none';
   const [y,m,d] = dateKey.split('-').map(Number);
   const date = new Date(y, m-1, d);
   const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===dateKey);
@@ -565,54 +593,73 @@ function openDayDetail(dateKey){
     const votes = DB.votes.filter(v=>v.event_id===ev.id);
     const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
     eventHtml = `
-      <div style="margin-bottom:14px;">
-        <b>Meal event</b> — ${ev.status==='closed'?'Closed':'Open'} (deadline ${new Date(ev.deadline).toLocaleString()})
-        <div class="row" style="margin-top:6px;">
-          <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
-          <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
-        </div>
-        ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}
-      </div>`;
+      <div class="section-label">🍽️ Meal event</div>
+      <div class="reminder-chip" style="background:var(--orange-light);">
+        <span>${ev.status==='closed'?'Closed':'Open'} · deadline ${new Date(ev.deadline).toLocaleString()}</span>
+      </div>
+      <div class="row" style="margin-bottom:6px;">
+        <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
+        <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
+      </div>
+      ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}`;
+  } else if(session.role==='admin'){
+    eventHtml = `<div class="empty-hint">No meal event on this date.</div>`;
   }
 
   const reminderSection = session.role!=='admin' ? `
-    <div>
-      <b>Reminders on this date</b>
-      <div id="dayReminderList">
-        ${dayReminders.length ? dayReminders.map(r=>`
-          <div class="memberrow">
-            <span>${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${r.repeat!=='none'?' · repeats '+r.repeat:''}${r.notified?' · sent':''}</span></span>
-            <button class="btn-secondary btn-small" onclick="deleteReminder('${r.id}','${dateKey}')">Remove</button>
-          </div>`).join('') : '<div class="muted">No reminders on this date yet.</div>'}
-      </div>
-      <div style="margin-top:10px;">
-        <input id="reminderText" placeholder="Reminder text">
-        <div class="row">
-          <input id="reminderTime" type="time" value="09:00">
-          <select id="reminderRepeat">
-            <option value="none">Does not repeat</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-        </div>
-        <button class="btn-primary" onclick="addReminderForDate('${dateKey}')">Add reminder</button>
-      </div>
-    </div>` : '';
+    <div class="section-label">⏰ Reminders</div>
+    <div id="dayReminderList">
+      ${dayReminders.length ? dayReminders.map((r,i)=>`
+        <div class="reminder-chip" style="animation-delay:${i*0.05}s;">
+          <span class="icon">${r.repeat!=='none'?'🔁':'⏰'}</span>
+          <span style="flex:1;">${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${r.repeat!=='none'?' · repeats '+r.repeat:''}${r.notified?' · sent':''}</span></span>
+          <span class="link" style="color:var(--red);" onclick="deleteReminder('${r.id}','${dateKey}')">✕</span>
+        </div>`).join('') : '<div class="empty-hint">No reminders on this date yet — add one below.</div>'}
+    </div>
+    <div class="section-label">Add a reminder</div>
+    <input id="reminderText" class="fancy-input" placeholder="What's this reminder for?">
+    <input id="reminderTime" class="fancy-input" type="time" value="09:00">
+    <div class="repeat-pills" id="repeatPills">
+      ${[['none','Just once'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']].map(([val,label])=>
+        `<div class="repeat-pill ${val==='none'?'active':''}" data-val="${val}" onclick="pickRepeat('${val}')">${label}</div>`
+      ).join('')}
+    </div>
+    <button class="big-add-btn" onclick="addReminderForDate('${dateKey}')">＋ Add reminder</button>` : '';
 
-  document.getElementById('dayDetail').innerHTML = `
-    <div class="card">
-      <h2>${date.toDateString()}</h2>
-      ${eventHtml}
-      ${reminderSection}
-      ${!ev && session.role==='admin' ? '<div class="muted">No meal event on this date.</div>' : ''}
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-backdrop" id="dayModalBackdrop" onclick="if(event.target===this) closeDayModal()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <span class="modal-close" onclick="closeDayModal()">✕</span>
+        <div class="modal-date-hero">
+          <div class="datebox"><div class="dnum">${d}</div><div class="dmon">${MONTH_SHORT[m-1]}</div></div>
+          <h2>${date.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'})}</h2>
+        </div>
+        ${eventHtml}
+        ${reminderSection}
+      </div>
     </div>`;
+  requestAnimationFrame(()=>{
+    const bd = document.getElementById('dayModalBackdrop');
+    if(bd) bd.classList.add('show');
+  });
+}
+function pickRepeat(val){
+  selectedRepeat = val;
+  document.querySelectorAll('#repeatPills .repeat-pill').forEach(p=>{
+    p.classList.toggle('active', p.dataset.val===val);
+  });
+}
+function closeDayModal(){
+  const bd = document.getElementById('dayModalBackdrop');
+  if(!bd) return;
+  bd.classList.remove('show');
+  setTimeout(()=>{ const root = document.getElementById('modalRoot'); if(root) root.innerHTML=''; }, 300);
 }
 async function addReminderForDate(dateKey){
   const text = document.getElementById('reminderText').value.trim();
   const time = document.getElementById('reminderTime').value || '09:00';
-  const repeat = document.getElementById('reminderRepeat').value;
+  const repeat = selectedRepeat;
   if(!text) return alert('Enter reminder text.');
   const [y,m,d] = dateKey.split('-').map(Number);
   const [hh,mm] = time.split(':').map(Number);
