@@ -161,7 +161,7 @@ const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 
 /* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
@@ -1173,7 +1173,7 @@ async function openChat(memberId){
         <div class="modal-handle"></div>
         <span class="modal-close" onclick="closeChatModal()">✕</span>
         <h2>${escapeHtml(other.name)}</h2>
-        <div style="max-height:50vh;overflow-y:auto;margin-bottom:10px;">
+        <div id="chatMsgArea" style="max-height:50vh;overflow-y:auto;margin-bottom:10px;">
           ${thread.map(m=>{
             const mine = m.from_id===session.memberId;
             const bubble = `<div class="msgline ${mine?'msg-me':'msg-them'}">${sanitizeRichText(m.text)}</div>`;
@@ -1189,7 +1189,7 @@ async function openChat(memberId){
           ).join('')}
         </div>
         <div id="chatInput" class="fancy-input compose-editable" contenteditable="true" data-placeholder="Type a message..." onkeydown="handleComposeKeydown(event, '${memberId}')"></div>
-        <button class="btn-primary" onclick="sendMsg('${memberId}')">Send</button>
+        <button class="btn-primary chat-send-btn" onclick="sendMsg('${memberId}')">Send</button>
       </div>
     </div>`;
   if(!alreadyOpen){
@@ -1266,14 +1266,90 @@ function renderTabBadgeOnly(){
   if(bar) bar.outerHTML = tabbarHtml();
 }
 async function sendMsg(memberId){
+  if(window._msgSending) return; // mutex: block re-entry while sending
   const input = document.getElementById('chatInput');
+  if(!input) return;
   const html = sanitizeRichText(input.innerHTML).trim();
   const plain = plainTextPreview(html);
   if(!plain) return;
+
+  // Lock UI immediately (WhatsApp feel: instant feedback)
+  window._msgSending = true;
+  const sendBtn = document.querySelector('.chat-send-btn');
+  if(sendBtn){ sendBtn.disabled = true; sendBtn.textContent = '...'; }
+  input.contentEditable = 'false';
+
+  // Optimistic bubble: show message instantly before server confirms
+  const msgArea = document.getElementById('chatMsgArea');
+  const tempId = 'tmp_' + Date.now();
+  if(msgArea){
+    const emptyHint = msgArea.querySelector('.empty-hint');
+    if(emptyHint) emptyHint.remove();
+    const tmpBubble = document.createElement('div');
+    tmpBubble.id = tempId;
+    tmpBubble.innerHTML = `<div class="msgline msg-me" style="opacity:.65">${html}</div><div class="seen" style="opacity:.5">Sending…</div>`;
+    msgArea.appendChild(tmpBubble);
+    msgArea.scrollTop = msgArea.scrollHeight;
+  }
+
+  // Clear input right away (WhatsApp clears before server response)
+  input.innerHTML = '';
+
+  // Send to server
   const res = await sendChatMessage(session.memberId, memberId, html);
-  if(res.error) return alert(res.error);
+
+  // Remove optimistic bubble
+  const tmpEl = document.getElementById(tempId);
+  if(tmpEl) tmpEl.remove();
+
+  // Unlock
+  window._msgSending = false;
+  input.contentEditable = 'true';
+  if(sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
+
+  if(res && res.error){
+    // Put message back so user doesn't lose it
+    input.innerHTML = html;
+    showChatToast('❌ Failed to send. Try again.');
+    return;
+  }
+
+  // Refresh only the message bubbles (no full page rebuild)
   await loadAll();
-  openChat(memberId);
+  refreshChatThread(memberId);
+  renderTabBadgeOnly();
+  input.focus();
+}
+
+// Refresh only the message bubbles inside an already-open chat
+function refreshChatThread(memberId){
+  const msgArea = document.getElementById('chatMsgArea');
+  if(!msgArea) return;
+  const thread = DB.messages.filter(m => !m.is_broadcast &&
+    ((m.from_id===session.memberId && m.to_id===memberId) || (m.from_id===memberId && m.to_id===session.memberId))
+  ).sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at));
+  msgArea.innerHTML = thread.map(m=>{
+    const mine = m.from_id===session.memberId;
+    const bubble = `<div class="msgline ${mine?'msg-me':'msg-them'}">${sanitizeRichText(m.text)}</div>`;
+    const seen = mine ? `<div class="seen">${m.read_at ? 'Seen at '+new Date(m.read_at).toLocaleTimeString() : 'Sent'}</div>` : '';
+    return bubble + seen;
+  }).join('') || '<div class="empty-hint">No messages yet — say hi!</div>';
+  msgArea.scrollTop = msgArea.scrollHeight;
+}
+
+// Toast notification (WhatsApp-style error feedback)
+function showChatToast(msg, duration=3000){
+  let t = document.getElementById('_appToast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = '_appToast';
+    t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#323232;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none;max-width:80vw;text-align:center;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._tid);
+  t._tid = setTimeout(()=>{ t.style.opacity='0'; }, duration);
 }
 
 /* ================= ADMIN ================= */
