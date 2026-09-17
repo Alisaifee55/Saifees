@@ -68,7 +68,7 @@
   /* Calligraphic Hijri month name (vector, inherits colour via currentColor) */
   .callig{display:flex;justify-content:center;align-items:center;line-height:0;}
   .callig svg{height:46px;width:auto;max-width:92%;display:block;color:var(--orange-dark);}
-  .calhead .sub{font-size:12px;letter-spacing:1.2px;margin-top:8px;opacity:.85;}
+  .calhead .sub{font-size:18px;letter-spacing:1.2px;margin-top:8px;opacity:.9;font-weight:700;}
   .modal-date-hero .callig svg{height:26px;color:var(--teal-dark);}
   .calgrid-wrap{position:relative;}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
@@ -161,7 +161,7 @@ const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 
 /* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
@@ -682,13 +682,8 @@ const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 let selectedDateKey = null;
 function handleDateTap(dateKey, event){
   event.stopPropagation();
-  if(selectedDateKey === dateKey){
-    closeDayPopover();
-    openDayDetail(dateKey); // second tap on the same date -> full editor
-  } else {
-    selectedDateKey = dateKey;
-    showDayPreview(dateKey, event.currentTarget);
-  }
+  closeDayPopover();
+  openDayDetail(dateKey); // single tap: shows the event if there is one, otherwise goes straight to adding a reminder
 }
 function closeDayPopover(){
   selectedDateKey = null;
@@ -850,6 +845,9 @@ function openDayDetail(dateKey){
   requestAnimationFrame(()=>{
     const bd = document.getElementById('dayModalBackdrop');
     if(bd) bd.classList.add('show');
+    if(!ev && session.role!=='admin'){
+      setTimeout(()=>{ const rt = document.getElementById('reminderText'); if(rt) rt.focus(); }, 320);
+    }
   });
 }
 function pickRepeat(val){
