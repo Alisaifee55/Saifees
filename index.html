@@ -671,7 +671,7 @@ function renderCalendar(){
           ${cellsHtml}
         </div>
       </div>
-      <div class="muted" style="margin-top:10px;">Tap a date to preview it, tap again to open and edit. Swipe left/right to change month. 🟠 pulsing dot = meal event · 🟢 dot = your reminder.</div>
+      <div class="muted" style="margin-top:10px;">Tap a date to preview it, tap again to open and edit. Swipe left/right to change month. 🟠 pulsing dot = Jaman event · 🟢 dot = your reminder.</div>
     </div>
   `;
   attachCalendarSwipe();
@@ -702,7 +702,7 @@ function showDayPreview(dateKey, cellEl){
   const date = new Date(y, m-1, d);
   const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===dateKey);
   const dayReminders = (DB.reminders||[]).filter(r=>ymdKey(new Date(r.remind_at))===dateKey);
-  let evLine = '<div class="muted">No meal event on this date.</div>';
+  let evLine = '<div class="muted">No Jaman event on this date.</div>';
   if(ev){
     const votes = DB.votes.filter(v=>v.event_id===ev.id);
     const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
@@ -790,7 +790,7 @@ function openDayDetail(dateKey){
     const votes = DB.votes.filter(v=>v.event_id===ev.id);
     const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
     eventHtml = `
-      <div class="section-label">🍽️ Meal event</div>
+      <div class="section-label">🍽️ Jaman event</div>
       <div class="reminder-chip" style="background:var(--orange-light);">
         <span>${ev.status==='closed'?'Closed':'Open'} · deadline ${new Date(ev.deadline).toLocaleString()}</span>
       </div>
@@ -800,7 +800,7 @@ function openDayDetail(dateKey){
       </div>
       ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}`;
   } else if(session.role==='admin'){
-    eventHtml = `<div class="empty-hint">No meal event on this date.</div>`;
+    eventHtml = `<div class="empty-hint">No Jaman event on this date.</div>`;
   }
 
   const reminderSection = session.role!=='admin' ? `
@@ -1206,7 +1206,7 @@ function renderAdmin(){
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="card">
-      <h2>Create meal event</h2>
+      <h2>Create Jaman event</h2>
       <input id="evDate" type="date">
       <input id="evDeadline" type="datetime-local">
       <button class="btn-primary" onclick="createEvent()">Create event</button>
