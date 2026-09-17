@@ -1209,7 +1209,7 @@ function renderAdmin(){
       <h2>Create Jaman event</h2>
       <input id="evDate" type="date">
       <input id="evDeadline" type="datetime-local">
-      <button class="btn-primary" onclick="createEvent()">Create event</button>
+      <button class="btn-primary" onclick="createJamanEvent()">Create event</button>
     </div>
     <div class="card">
       <h2>All events</h2>
@@ -1237,7 +1237,7 @@ function renderAdmin(){
     </div>
   `;
 }
-async function createEvent(){
+async function createJamanEvent(){
   const d = document.getElementById('evDate').value;
   const dl = document.getElementById('evDeadline').value;
   if(!d || !dl) return alert('Pick a date and deadline.');
