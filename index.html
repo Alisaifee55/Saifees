@@ -76,8 +76,8 @@
   .day-popover.show{transform:scale(1);opacity:1;pointer-events:auto;}
   .day-popover .dpop-title{font-weight:800;color:var(--teal-dark);margin-bottom:6px;font-size:13px;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
-  .calday{border-radius:12px;padding:6px 2px 8px;min-height:70px;background:#fdfaf5;position:relative;}
-  .calday .h{font-size:32px;font-weight:700;color:var(--teal);margin-top:2px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
+  .calday{border-radius:10px;padding:4px 2px 5px;min-height:52px;background:#fdfaf5;position:relative;}
+  .calday .h{font-size:22px;font-weight:700;color:var(--teal);margin-top:1px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
   .calday .g{font-size:10px;color:var(--muted);margin-top:2px;}
   .calday.today{background:var(--orange-light);border:2px solid var(--orange);}
   .calday.today .h{color:var(--orange-dark);}
@@ -161,7 +161,7 @@ const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.7";
 
 /* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
@@ -276,21 +276,30 @@ function famName(id){ return (DB.families.find(f=>f.id===id)||{}).name || ''; }
 async function addNotification(memberId, text){
   await sb.from('notifications').insert({member_id: memberId, text});
 }
-async function sendPush(target, message){
+async function sendPush(target, message, additionalData={}){
   try{
+    // Build payload: merge url + additionalData so notification click deep-links
+    const launchUrl = window.location.origin + window.location.pathname + buildDeepLink(additionalData);
     if(target === 'ALL'){
-      await sb.functions.invoke('send-push', { body: { target: 'ALL', message } });
+      await sb.functions.invoke('send-push', { body: { target: 'ALL', message, additionalData, url: launchUrl } });
       return;
     }
-    // target is a member_id — prefer their stored OneSignal subscription ID (reliable),
-    // fall back to external_id alias targeting if we don't have one yet.
     const member = findMember(target);
+    const body = { message, additionalData, url: launchUrl };
     if(member && member.onesignal_subscription_id){
-      await sb.functions.invoke('send-push', { body: { subscriptionIds: [member.onesignal_subscription_id], message } });
+      await sb.functions.invoke('send-push', { body: { subscriptionIds: [member.onesignal_subscription_id], ...body } });
     } else {
-      await sb.functions.invoke('send-push', { body: { target, message } });
+      await sb.functions.invoke('send-push', { body: { target, ...body } });
     }
   }catch(e){ console.error('push failed', e); }
+}
+// Build a query-string deep link from additionalData
+function buildDeepLink(data={}){
+  if(!data.type) return '';
+  const p = new URLSearchParams({deeplink: data.type});
+  if(data.fromId) p.set('from', data.fromId);
+  if(data.eventId) p.set('event', data.eventId);
+  return '?' + p.toString();
 }
 
 async function registerFamily(name, headName, password){
@@ -357,7 +366,7 @@ async function sendChatMessage(fromId, toId, text){
   if(error) return {error:error.message};
   const sender = findMember(fromId);
   await addNotification(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`);
-  sendPush(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`);
+  sendPush(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`, {type:'chat', fromId});
   return {ok:true};
 }
 async function markMessagesRead(fromId, toId){
@@ -372,7 +381,7 @@ async function sendReminderRow(eventId){
     const voted = DB.votes.some(v=>v.event_id===eventId && v.member_id===m.id);
     if(!voted){
       await addNotification(m.id, `Reminder: please RSVP for ${dateLabel} before ${new Date(ev.deadline).toLocaleString()}.`);
-      sendPush(m.id, `Reminder: please RSVP for ${dateLabel}.`);
+      sendPush(m.id, `Reminder: please RSVP for ${dateLabel}.`, {type:'vote', eventId});
       count++;
     }
   }
@@ -382,7 +391,7 @@ async function broadcastMessage(text){
   const { error } = await sb.from('messages').insert({ from_id: null, to_id: null, text, is_broadcast: true, sender_label:'Admin' });
   if(error) return {error:error.message};
   for(const m of DB.members) await addNotification(m.id, `[Admin] ${text}`);
-  sendPush('ALL', `[Admin] ${text}`);
+  sendPush('ALL', `[Admin] ${text}`, {type:'announcements'});
   return {ok:true, count: DB.members.length};
 }
 async function markNotifsRead(memberId){
@@ -405,7 +414,84 @@ function setupRealtime(){
     .subscribe();
 }
 async function refreshQuiet(){
-  try{ await loadAll(); render(); }catch(e){ console.error(e); }
+  try{ await loadAll(); render(); updateAppBadge(); }catch(e){ console.error(e); }
+}
+// Update the PWA app icon badge with unread count
+function updateAppBadge(){
+  if(!session || session.role==='admin') return;
+  const msgCount = unreadMessageCount() + unreadAnnouncementCount();
+  const notifCount = DB.notifications.filter(n=>n.member_id===session.memberId && !n.read).length;
+  const total = msgCount + notifCount;
+  try{
+    if('setAppBadge' in navigator){
+      if(total > 0) navigator.setAppBadge(total);
+      else navigator.clearAppBadge();
+    }
+  }catch(e){ /* not supported on this browser */ }
+}
+
+
+/* ============================================================
+   DEEP LINK ROUTING — notification click opens correct tab
+   ============================================================ */
+function handleDeepLinkOnLoad(){
+  if(!session) return;
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get('deeplink');
+  if(!type) return;
+  // Clean URL so back/refresh don't re-trigger
+  history.replaceState({}, '', window.location.pathname);
+  routeDeepLink(type, {
+    fromId: params.get('from') || null,
+    eventId: params.get('event') || null
+  });
+}
+function routeDeepLink(type, data={}){
+  if(!session) return;
+  if(type === 'chat'){
+    // Open Messages tab → Chats sub-tab → open the specific conversation
+    activeTab = 'messages';
+    notifOpen = false;
+    msgSubTab = 'chats';
+    render();
+    if(data.fromId){
+      // Small delay so the chat list is rendered before we try to open the modal
+      setTimeout(()=> openChat(data.fromId), 120);
+    }
+  } else if(type === 'vote'){
+    // Open Vote tab (and optionally scroll to the event)
+    activeTab = 'vote';
+    notifOpen = false;
+    render();
+    if(data.eventId){
+      setTimeout(()=>{
+        // Try to click the Vote button for that event if it exists
+        const btn = document.querySelector(`[onclick*="openVoteGrid('${data.eventId}')"]`);
+        if(btn) btn.click();
+      }, 150);
+    }
+  } else if(type === 'announcements'){
+    activeTab = 'messages';
+    notifOpen = false;
+    msgSubTab = 'announcements';
+    render();
+  } else if(type === 'calendar'){
+    activeTab = 'calendar';
+    notifOpen = false;
+    render();
+  }
+}
+function setupOneSignalClickHandler(){
+  // OneSignal foreground notification click handler
+  // Fires when user taps a notification while the app is open (or when SW routes back)
+  OneSignalDeferred.push(function(OneSignal){
+    try{
+      OneSignal.Notifications.addEventListener('click', function(e){
+        const data = e && e.notification && e.notification.additionalData ? e.notification.additionalData : {};
+        if(data.type) routeDeepLink(data.type, data);
+      });
+    }catch(err){ /* OneSignal not ready */ }
+  });
 }
 
 /* ================= Boot / render root ================= */
@@ -422,6 +508,9 @@ async function boot(){
     render();
     setupRealtime();
     if(session) registerPushForMember(session.memberId);
+    // Handle deep link from notification click (URL param OR OneSignal foreground click)
+    handleDeepLinkOnLoad();
+    setupOneSignalClickHandler();
     if(heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(heartbeat, 60000);
   }catch(e){
@@ -675,6 +764,8 @@ function renderCalendar(){
     </div>
   `;
   attachCalendarSwipe();
+  // Auto-scroll: ensure calendar grid is visible, not tabs
+  window.scrollTo({top:0, behavior:'instant'});
 }
 let selectedRepeat = 'none';
 let editingReminderId = null;
