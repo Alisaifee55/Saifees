@@ -161,7 +161,7 @@ const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.5";
 
 /* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
@@ -671,12 +671,13 @@ function renderCalendar(){
           ${cellsHtml}
         </div>
       </div>
-      <div class="muted" style="margin-top:10px;">Tap a date to preview it, tap again to open and edit. Swipe left/right to change month. 🟠 pulsing dot = Jaman event · 🟢 dot = your reminder.</div>
+      <div class="muted" style="margin-top:10px;">Tap a date to preview it, tap again to open and edit. Swipe left/right to change month. 🟠 pulsing dot = meal event · 🟢 dot = your reminder.</div>
     </div>
   `;
   attachCalendarSwipe();
 }
 let selectedRepeat = 'none';
+let editingReminderId = null;
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 let selectedDateKey = null;
@@ -702,7 +703,7 @@ function showDayPreview(dateKey, cellEl){
   const date = new Date(y, m-1, d);
   const ev = DB.events.find(e=>e.g_date && ymdKey(new Date(e.g_date))===dateKey);
   const dayReminders = (DB.reminders||[]).filter(r=>ymdKey(new Date(r.remind_at))===dateKey);
-  let evLine = '<div class="muted">No Jaman event on this date.</div>';
+  let evLine = '<div class="muted">No meal event on this date.</div>';
   if(ev){
     const votes = DB.votes.filter(v=>v.event_id===ev.id);
     const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
@@ -779,6 +780,7 @@ function attachAppSwipe(){
 }
 function openDayDetail(dateKey){
   selectedRepeat = 'none';
+  editingReminderId = null;
   const [y,m,d] = dateKey.split('-').map(Number);
   const date = new Date(y, m-1, d);
   const hj = gregorianToHijri(y, m, d);
@@ -790,7 +792,7 @@ function openDayDetail(dateKey){
     const votes = DB.votes.filter(v=>v.event_id===ev.id);
     const count = (meal,resp)=>votes.filter(v=>v.meal===meal && v.response===resp).length;
     eventHtml = `
-      <div class="section-label">🍽️ Jaman event</div>
+      <div class="section-label">🍽️ Meal event</div>
       <div class="reminder-chip" style="background:var(--orange-light);">
         <span>${ev.status==='closed'?'Closed':'Open'} · deadline ${new Date(ev.deadline).toLocaleString()}</span>
       </div>
@@ -800,8 +802,10 @@ function openDayDetail(dateKey){
       </div>
       ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}`;
   } else if(session.role==='admin'){
-    eventHtml = `<div class="empty-hint">No Jaman event on this date.</div>`;
+    eventHtml = `<div class="empty-hint">No meal event on this date.</div>`;
   }
+
+  const quickPresets = [['15 min',15],['30 min',30],['1 hr',60],['3 hrs',180],['6 hrs',360],['Tomorrow',1440]];
 
   const reminderSection = session.role!=='admin' ? `
     <div class="section-label">⏰ Reminders</div>
@@ -810,18 +814,35 @@ function openDayDetail(dateKey){
         <div class="reminder-chip" style="animation-delay:${i*0.05}s;">
           <span class="icon">${r.repeat!=='none'?'🔁':'⏰'}</span>
           <span style="flex:1;">${escapeHtml(r.text)}<br><span class="muted">${new Date(r.remind_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${r.repeat!=='none'?' · repeats '+r.repeat:''}${r.notified?' · sent':''}</span></span>
+          <span class="link" style="margin-right:8px;" onclick='startEditReminder(${JSON.stringify(r.id)}, ${JSON.stringify(dateKey)})'>✎</span>
           <span class="link" style="color:var(--red);" onclick="deleteReminder('${r.id}','${dateKey}')">✕</span>
         </div>`).join('') : '<div class="empty-hint">No reminders on this date yet — add one below.</div>'}
     </div>
-    <div class="section-label">Add a reminder</div>
+    <div class="section-label" id="reminderFormLabel">Add a reminder</div>
     <input id="reminderText" class="fancy-input" placeholder="What's this reminder for?">
-    <input id="reminderTime" class="fancy-input" type="time" value="09:00">
-    <div class="repeat-pills" id="repeatPills">
-      ${[['none','Just once'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']].map(([val,label])=>
-        `<div class="repeat-pill ${val==='none'?'active':''}" data-val="${val}" onclick="pickRepeat('${val}')">${label}</div>`
-      ).join('')}
+
+    <div class="repeat-pills" style="margin-bottom:6px;">
+      <div class="repeat-pill active" data-mode="time" onclick="setReminderMode('time','${dateKey}')">At a time</div>
+      <div class="repeat-pill" data-mode="quick" onclick="setReminderMode('quick','${dateKey}')">In...</div>
     </div>
-    <button class="big-add-btn" onclick="addReminderForDate('${dateKey}')">＋ Add reminder</button>` : '';
+
+    <div id="reminderTimeBlock">
+      <input id="reminderTime" class="fancy-input" type="time" value="09:00" oninput="updateReminderPreview('${dateKey}')">
+      <div class="muted" id="reminderPreview" style="margin:-6px 0 10px;"></div>
+      <div class="repeat-pills" id="repeatPills">
+        ${[['none','Just once'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['yearly','Yearly']].map(([val,label])=>
+          `<div class="repeat-pill ${val==='none'?'active':''}" data-val="${val}" onclick="pickRepeat('${val}')">${label}</div>`
+        ).join('')}
+      </div>
+      <button class="big-add-btn" id="reminderSaveBtn" onclick="saveReminderForDate('${dateKey}')">＋ Add reminder</button>
+    </div>
+
+    <div id="reminderQuickBlock" style="display:none;">
+      <div class="repeat-pills">
+        ${quickPresets.map(([label,mins])=>`<div class="repeat-pill" onclick="addQuickReminder(${mins})">${label}</div>`).join('')}
+      </div>
+      <div class="muted">Creates the reminder right away, whatever date it lands on.</div>
+    </div>` : '';
 
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-backdrop" id="dayModalBackdrop" onclick="if(event.target===this) closeDayModal()">
@@ -845,10 +866,46 @@ function openDayDetail(dateKey){
   requestAnimationFrame(()=>{
     const bd = document.getElementById('dayModalBackdrop');
     if(bd) bd.classList.add('show');
+    updateReminderPreview(dateKey);
     if(!ev && session.role!=='admin'){
       setTimeout(()=>{ const rt = document.getElementById('reminderText'); if(rt) rt.focus(); }, 320);
     }
   });
+}
+function setReminderMode(mode, dateKey){
+  document.querySelectorAll('.repeat-pills [data-mode]').forEach(p=>p.classList.toggle('active', p.dataset.mode===mode));
+  document.getElementById('reminderTimeBlock').style.display = mode==='time' ? 'block' : 'none';
+  document.getElementById('reminderQuickBlock').style.display = mode==='quick' ? 'block' : 'none';
+}
+function updateReminderPreview(dateKey){
+  const timeEl = document.getElementById('reminderTime');
+  const prevEl = document.getElementById('reminderPreview');
+  if(!timeEl || !prevEl) return;
+  const [y,m,d] = dateKey.split('-').map(Number);
+  const [hh,mm] = (timeEl.value || '09:00').split(':').map(Number);
+  const dt = new Date(y, m-1, d, hh, mm);
+  prevEl.textContent = 'Reminds you: ' + dt.toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+}
+function startEditReminder(id, dateKey){
+  const r = (DB.reminders||[]).find(x=>x.id===id);
+  if(!r) return;
+  editingReminderId = id;
+  selectedRepeat = r.repeat || 'none';
+  setReminderMode('time', dateKey);
+  const textEl = document.getElementById('reminderText');
+  const timeEl = document.getElementById('reminderTime');
+  const labelEl = document.getElementById('reminderFormLabel');
+  const btnEl = document.getElementById('reminderSaveBtn');
+  if(textEl) textEl.value = r.text;
+  if(timeEl){
+    const dt = new Date(r.remind_at);
+    timeEl.value = String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+  }
+  if(labelEl) labelEl.textContent = 'Editing reminder';
+  if(btnEl) btnEl.textContent = '✓ Save changes';
+  document.querySelectorAll('#repeatPills .repeat-pill').forEach(p=>p.classList.toggle('active', p.dataset.val===selectedRepeat));
+  updateReminderPreview(dateKey);
+  if(textEl) textEl.focus();
 }
 function pickRepeat(val){
   selectedRepeat = val;
@@ -895,7 +952,7 @@ async function deleteReminderGlobal(id){
   await loadAll();
   openAllReminders();
 }
-async function addReminderForDate(dateKey){
+async function saveReminderForDate(dateKey){
   const text = document.getElementById('reminderText').value.trim();
   const time = document.getElementById('reminderTime').value || '09:00';
   const repeat = selectedRepeat;
@@ -903,11 +960,29 @@ async function addReminderForDate(dateKey){
   const [y,m,d] = dateKey.split('-').map(Number);
   const [hh,mm] = time.split(':').map(Number);
   const remindAt = new Date(y, m-1, d, hh, mm).toISOString();
-  const { error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: remindAt, repeat });
+
+  let error;
+  if(editingReminderId){
+    ({ error } = await sb.from('reminders').update({ text, remind_at: remindAt, repeat, notified: false }).eq('id', editingReminderId));
+  } else {
+    ({ error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: remindAt, repeat }));
+  }
   if(error) return alert(error.message);
+  editingReminderId = null;
   await loadAll();
   renderCalendar();
   openDayDetail(dateKey);
+}
+async function addQuickReminder(minutesFromNow){
+  const text = document.getElementById('reminderText').value.trim();
+  if(!text) return alert('Enter reminder text first.');
+  const remindAt = new Date(Date.now() + minutesFromNow*60000).toISOString();
+  const { error } = await sb.from('reminders').insert({ member_id: session.memberId, text, remind_at: remindAt, repeat: 'none' });
+  if(error) return alert(error.message);
+  await loadAll();
+  renderCalendar();
+  closeDayModal();
+  alert('Reminder set for ' + new Date(remindAt).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) + '.');
 }
 async function deleteReminder(id, dateKey){
   await sb.from('reminders').delete().eq('id', id);
@@ -1206,10 +1281,10 @@ function renderAdmin(){
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="card">
-      <h2>Create Jaman event</h2>
+      <h2>Create meal event</h2>
       <input id="evDate" type="date">
       <input id="evDeadline" type="datetime-local">
-      <button class="btn-primary" onclick="createJamanEvent()">Create event</button>
+      <button class="btn-primary" onclick="createEvent()">Create event</button>
     </div>
     <div class="card">
       <h2>All events</h2>
@@ -1237,7 +1312,7 @@ function renderAdmin(){
     </div>
   `;
 }
-async function createJamanEvent(){
+async function createEvent(){
   const d = document.getElementById('evDate').value;
   const dl = document.getElementById('evDeadline').value;
   if(!d || !dl) return alert('Pick a date and deadline.');
