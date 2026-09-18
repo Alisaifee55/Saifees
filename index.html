@@ -160,8 +160,8 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const ADMIN_PASSCODE = "admin123"; // change this for your real deployment
-const APP_VERSION = "2.7";
+const APP_VERSION = "2.8";
+const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
 function gregorianToHijri(gy, gm, gd){
@@ -257,7 +257,7 @@ async function loadAll(){
     families: fam.data||[], members: mem.data||[], events: ev.data||[],
     votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[], reminders: []
   };
-  if(session && session.role!=='admin' && session.memberId){
+  if(session && session.role!=='admin' && session.role!=='superadmin' && session.memberId){
     const { data } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
     DB.reminders = data || [];
   }
@@ -318,12 +318,15 @@ async function loginUser(name, password){
   if(fam){
     const head = DB.members.find(m=>m.family_id===fam.id && m.is_head);
     await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', head.id);
-    return { familyId: fam.id, memberId: head.id, name: head.name, role:'head' };
+    // Role from DB; superadmin always = ADS
+    const role = head.id === SUPERADMIN_ID ? 'superadmin' : (head.role || 'member');
+    return { familyId: fam.id, memberId: head.id, name: head.name, role };
   }
   const mem = DB.members.find(m=>m.name.toLowerCase()===name.toLowerCase() && String(m.password)===String(password) && !m.is_head);
   if(mem){
     await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', mem.id);
-    return { familyId: mem.family_id, memberId: mem.id, name: mem.name, role:'member' };
+    const role = mem.id === SUPERADMIN_ID ? 'superadmin' : (mem.role || 'member');
+    return { familyId: mem.family_id, memberId: mem.id, name: mem.name, role };
   }
   return {error:'No match found.'};
 }
@@ -418,7 +421,7 @@ async function refreshQuiet(){
 }
 // Update the PWA app icon badge with unread count
 function updateAppBadge(){
-  if(!session || session.role==='admin') return;
+  if(!session || session.role==='admin'||session.role==='superadmin') return;
   const msgCount = unreadMessageCount() + unreadAnnouncementCount();
   const notifCount = DB.notifications.filter(n=>n.member_id===session.memberId && !n.read).length;
   const total = msgCount + notifCount;
@@ -505,6 +508,14 @@ async function boot(){
     if(session && session.role!=='admin' && !DB.members.some(m=>m.id===session.memberId)){
       session = null; clearSession();
     }
+    // Refresh role from DB (role may have changed since last login)
+    if(session && session.memberId){
+      const freshMember = DB.members.find(m => m.id === session.memberId);
+      if(freshMember && freshMember.role){
+        session.role = freshMember.role;
+        saveSession();
+      }
+    }
     render();
     setupRealtime();
     if(session) registerPushForMember(session.memberId);
@@ -558,7 +569,7 @@ async function enableNotifications(){
 }
 
 function unreadMessageCount(){
-  if(!session || session.role==='admin') return 0;
+  if(!session || session.role==='admin'||session.role==='superadmin') return 0;
   return DB.messages.filter(m=>!m.is_broadcast && m.to_id===session.memberId && !m.read_at).length;
 }
 function unreadAnnouncementCount(){
@@ -578,7 +589,7 @@ function render(){
         <div class="who">${session ? escapeHtml(session.name)+' · '+session.role : 'Not logged in'} <span style="opacity:.6;">· v${APP_VERSION}</span></div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
-        ${session && session.role!=='admin' ? bellHtml() : ''}
+        ${session && session.role!=='admin'&&session.role!=='superadmin' ? bellHtml() : ''}
         ${session ? `<a class="link" style="color:#fff;" onclick="doLogout()">Logout</a>` : ''}
       </div>
     </header>
@@ -592,6 +603,7 @@ function render(){
   else if(activeTab==='presence') renderPresence();
   else if(activeTab==='messages') renderMessages();
   else if(activeTab==='admin') renderAdmin();
+  else if(activeTab==='superadmin') renderSuperAdmin();
 }
 function bellHtml(){
   const list = DB.notifications.filter(n=>n.member_id===session.memberId);
@@ -619,7 +631,8 @@ function tabbarHtml(){
     {id:'presence', icon:'👥', label:'Presence'},
     {id:'messages', icon:'💬', label:'Messages', badge: msgBadge},
   ];
-  if(session.role==='admin') tabs.push({id:'admin', icon:'⚙️', label:'Admin'});
+  if(session.role==='admin' || session.role==='superadmin') tabs.push({id:'admin', icon:'⚙️', label:'Admin'});
+  if(session.role==='superadmin') tabs.push({id:'superadmin', icon:'👑', label:'ADS'});
   return `<div class="tabbar">${tabs.map(t=>`
     <button class="${activeTab===t.id?'active':''}" onclick="setTab('${t.id}')">
       <span class="tabicon">${t.icon}</span>${t.label}
@@ -640,7 +653,6 @@ function renderAuth(){
         <button class="btn-secondary btn-small" onclick="authMode='login';render()">Family / Member Login</button>
         <button class="btn-secondary btn-small" onclick="authMode='registerFamily';render()">Register Family</button>
       </div>
-      <a class="link" onclick="authMode='adminLogin';render()">Admin login</a>
       <div id="authbody" style="margin-top:14px;"></div>
     </div>`;
   const body = document.getElementById('authbody');
@@ -655,10 +667,6 @@ function renderAuth(){
       <input id="regHeadName" placeholder="Your name (family head)">
       <input id="regPass" type="password" placeholder="Choose a password">
       <button class="btn-primary" onclick="doRegisterFamily()">Register Family</button>`;
-  } else if(authMode==='adminLogin'){
-    body.innerHTML = `
-      <input id="adminPass" type="password" placeholder="Admin passcode">
-      <button class="btn-primary" onclick="doAdminLogin()">Login as Admin</button>`;
   }
 }
 async function doRegisterFamily(){
@@ -686,14 +694,7 @@ async function doLogin(){
   await loadAll();
   render();
 }
-async function doAdminLogin(){
-  const pass = document.getElementById('adminPass').value;
-  if(pass !== ADMIN_PASSCODE) return alert('Incorrect passcode.');
-  session = {role:'admin', name:'Super Admin', memberId:'ADMIN'};
-  saveSession();
-  await loadAll();
-  render();
-}
+// doAdminLogin removed — admin access via DB role only
 
 /* ================= CALENDAR ================= */
 function renderCalendar(){
@@ -749,7 +750,7 @@ function renderCalendar(){
         <button class="btn-secondary btn-small" onclick="shiftMonth(0)">Today</button>
         <button class="btn-secondary btn-small" onclick="shiftMonth(1)">Next &rarr;</button>
       </div>
-      ${session.role!=='admin' ? `<div class="row" style="margin-bottom:8px;"><a class="link" onclick="openAllReminders()">📋 My reminders</a></div>` : ''}
+      ${session.role!=='admin'&&session.role!=='superadmin' ? `<div class="row" style="margin-bottom:8px;"><a class="link" onclick="openAllReminders()">📋 My reminders</a></div>` : ''}
       <div class="calhead">
         ${monthCallig(hijriViewM)}
         <div class="sub" style="font-family:'FatemiQanz','Segoe UI',sans-serif;">${hijriViewY}</div>
@@ -891,14 +892,14 @@ function openDayDetail(dateKey){
         <div><b>Lunch</b><br><span class="tag tag-yes">Yes ${count('Lunch','Yes')}</span> <span class="tag tag-no">No ${count('Lunch','No')}</span></div>
         <div><b>Dinner</b><br><span class="tag tag-yes">Yes ${count('Dinner','Yes')}</span> <span class="tag tag-no">No ${count('Dinner','No')}</span></div>
       </div>
-      ${session.role==='admin' ? adminFamilyBreakdown(ev.id) : ''}`;
-  } else if(session.role==='admin'){
+      ${(session.role==='admin'||session.role==='superadmin') ? adminFamilyBreakdown(ev.id) : ''}`;
+  } else if(session.role==='admin'||session.role==='superadmin'){
     eventHtml = `<div class="empty-hint">No meal event on this date.</div>`;
   }
 
   const quickPresets = [['15 min',15],['30 min',30],['1 hr',60],['3 hrs',180],['6 hrs',360],['Tomorrow',1440]];
 
-  const reminderSection = session.role!=='admin' ? `
+  const reminderSection = (session.role!=='admin'&&session.role!=='superadmin') ? `
     <div class="section-label">⏰ Reminders</div>
     <div id="dayReminderList">
       ${dayReminders.length ? dayReminders.map((r,i)=>`
@@ -1094,7 +1095,7 @@ function adminFamilyBreakdown(eventId){
 /* ================= VOTE ================= */
 function renderVote(){
   const main = document.getElementById('main');
-  if(session.role==='admin'){
+  if(session.role==='admin'||session.role==='superadmin'){
     main.innerHTML = `<div class="card"><h2>Voting is per-family</h2><div class="muted">Log in as a family to vote. Use the Admin tab to manage events.</div></div>`;
     return;
   }
@@ -1443,9 +1444,127 @@ function showChatToast(msg, duration=3000){
   t._tid = setTimeout(()=>{ t.style.opacity='0'; }, duration);
 }
 
+
+/* ============================================================
+   SUPER ADMIN PANEL — ADS Only (Ali Asgar Saifee)
+   ============================================================ */
+function renderSuperAdmin(){
+  const main = document.getElementById('main');
+  if(!main) return;
+  if(session.memberId !== SUPERADMIN_ID){ main.innerHTML='<div class="card"><p>Access denied.</p></div>'; return; }
+
+  // Build member list with role toggles
+  const memberRows = DB.members.map(m => {
+    const isADS = m.id === SUPERADMIN_ID;
+    const role = m.role || 'member';
+    let badge = '';
+    let toggleBtn = '';
+    if(isADS){
+      badge = `<span class="tag" style="background:var(--orange);color:#fff;">Super Admin</span>`;
+    } else if(role === 'admin'){
+      badge = `<span class="tag" style="background:var(--teal);color:#fff;">Admin</span>`;
+      toggleBtn = `<button class="pill off btn-small" onclick="revokeAdmin('${m.id}','${escapeHtml(m.name)}')">Revoke</button>`;
+    } else {
+      badge = `<span class="tag" style="background:#eee;color:var(--muted);">Member</span>`;
+      toggleBtn = `<button class="pill on btn-small" onclick="grantAdmin('${m.id}','${escapeHtml(m.name)}')">Make Admin</button>`;
+    }
+    return `<div class="memberrow">
+      <div>
+        <div style="font-weight:700;">${escapeHtml(m.name)}</div>
+        <div style="margin-top:3px;">${badge}</div>
+      </div>
+      ${toggleBtn}
+    </div>`;
+  }).join('');
+
+  // Build conversation viewer dropdown
+  const memberOptions = DB.members
+    .filter(m => m.id !== SUPERADMIN_ID)
+    .map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`)
+    .join('');
+
+  main.innerHTML = `
+    <div class="card">
+      <h2 style="color:var(--orange-dark);">👑 ADS Control Panel</h2>
+      <p class="muted" style="margin-bottom:14px;">Manage admin rights and view all conversations.</p>
+
+      <div class="section-label">Member Roles</div>
+      ${memberRows}
+    </div>
+
+    <div class="card" style="margin-top:0;">
+      <div class="section-label">View Any Conversation</div>
+      <p class="muted" style="font-size:12px;margin-bottom:10px;">Read-only — you cannot send messages from here.</p>
+      <div class="row" style="margin-bottom:10px;">
+        <select id="adsViewA" onchange="adsLoadThread()" style="margin-bottom:0;">
+          <option value="">— Member A —</option>
+          ${memberOptions}
+        </select>
+        <select id="adsViewB" onchange="adsLoadThread()" style="margin-bottom:0;">
+          <option value="">— Member B —</option>
+          ${memberOptions}
+        </select>
+      </div>
+      <div id="adsThreadArea" style="max-height:45vh;overflow-y:auto;background:#fdfaf5;border-radius:12px;padding:10px;">
+        <div class="empty-hint">Select two members to view their conversation.</div>
+      </div>
+    </div>
+  `;
+}
+
+async function grantAdmin(memberId, name){
+  if(!confirm(\`Make \${name} an Admin?\nThey will be able to create events, send reminders, and broadcast messages.\`)) return;
+  const { error } = await sb.from('members').update({ role: 'admin' }).eq('id', memberId);
+  if(error){ showChatToast('❌ Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast(\`✅ \${name} is now an Admin\`);
+  renderSuperAdmin();
+}
+
+async function revokeAdmin(memberId, name){
+  if(!confirm(\`Remove Admin rights from \${name}?\`)) return;
+  const { error } = await sb.from('members').update({ role: 'member' }).eq('id', memberId);
+  if(error){ showChatToast('❌ Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast(\`✅ \${name} is now a regular Member\`);
+  renderSuperAdmin();
+}
+
+function adsLoadThread(){
+  const aId = document.getElementById('adsViewA')?.value;
+  const bId = document.getElementById('adsViewB')?.value;
+  const area = document.getElementById('adsThreadArea');
+  if(!area) return;
+  if(!aId || !bId || aId === bId){
+    area.innerHTML = '<div class="empty-hint">Select two different members.</div>';
+    return;
+  }
+  const thread = DB.messages.filter(m =>
+    !m.is_broadcast &&
+    ((m.from_id === aId && m.to_id === bId) || (m.from_id === bId && m.to_id === aId))
+  ).sort((a,b) => new Date(a.sent_at) - new Date(b.sent_at));
+
+  if(!thread.length){
+    area.innerHTML = '<div class="empty-hint">No messages between these two members.</div>';
+    return;
+  }
+  area.innerHTML = thread.map(m => {
+    const fromName = escapeHtml(findMember(m.from_id)?.name || 'Unknown');
+    const time = new Date(m.sent_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const date = new Date(m.sent_at).toLocaleDateString();
+    const isA = m.from_id === aId;
+    return \`<div style="margin-bottom:10px;">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:2px;\${isA?'text-align:left':'text-align:right'}">\${fromName} · \${date} \${time}</div>
+      <div class="msgline \${isA?'msg-them':'msg-me'}" style="max-width:80%;\${isA?'':'margin-left:auto'}">\${sanitizeRichText(m.text)}</div>
+    </div>\`;
+  }).join('');
+  area.scrollTop = area.scrollHeight;
+}
+
 /* ================= ADMIN ================= */
 function renderAdmin(){
   const main = document.getElementById('main');
+  if(session.role!=='admin'&&session.role!=='superadmin'){ main.innerHTML='<div class="card"><p>Access denied.</p></div>'; return; }
   main.innerHTML = `
     <div class="card">
       <h2>Create meal event</h2>
