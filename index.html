@@ -1453,80 +1453,151 @@ function renderSuperAdmin(){
   if(!main) return;
   if(session.memberId !== SUPERADMIN_ID){ main.innerHTML='<div class="card"><p>Access denied.</p></div>'; return; }
 
-  // Build member list with role toggles
-  const memberRows = DB.members.map(m => {
-    const isADS = m.id === SUPERADMIN_ID;
-    const role = m.role || 'member';
-    let badge = '';
-    let toggleBtn = '';
-    if(isADS){
-      badge = `<span class="tag" style="background:var(--orange);color:#fff;">Super Admin</span>`;
-    } else if(role === 'admin'){
-      badge = `<span class="tag" style="background:var(--teal);color:#fff;">Admin</span>`;
-      toggleBtn = `<button class="pill off btn-small" onclick="revokeAdmin('${m.id}','${escapeHtml(m.name)}')">Revoke</button>`;
-    } else {
-      badge = `<span class="tag" style="background:#eee;color:var(--muted);">Member</span>`;
-      toggleBtn = `<button class="pill on btn-small" onclick="grantAdmin('${m.id}','${escapeHtml(m.name)}')">Make Admin</button>`;
-    }
-    return `<div class="memberrow">
-      <div>
-        <div style="font-weight:700;">${escapeHtml(m.name)}</div>
-        <div style="margin-top:3px;">${badge}</div>
-      </div>
-      ${toggleBtn}
-    </div>`;
-  }).join('');
+  const roleColor = {superadmin:'var(--orange)', admin:'var(--teal)', member:'var(--muted)'};
+  const roleName  = {superadmin:'Super Admin', admin:'Admin', member:'Member'};
 
-  // Build conversation viewer dropdown
+  let memberRows = '';
+  DB.members.forEach(function(m){
+    const isADS = m.id === SUPERADMIN_ID;
+    const role = m.id === SUPERADMIN_ID ? 'superadmin' : (m.role || 'member');
+    const badgeStyle = 'background:' + (role==='superadmin'?'var(--orange)':role==='admin'?'var(--teal)':'#eee') + ';color:' + (role==='member'?'var(--muted)':'#fff') + ';font-size:10px;';
+    const badge = '<span class="tag" style="' + badgeStyle + '">' + roleName[role] + '</span>';
+    let btn = '';
+    if(!isADS && role==='admin'){
+      btn = '<button class="pill off btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="revokeAdmin(this.dataset.mid,this.dataset.mn)">Revoke</button>';
+    } else if(!isADS){
+      btn = '<button class="pill on btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="grantAdmin(this.dataset.mid,this.dataset.mn)">Make Admin</button>';
+    }
+    memberRows += '<div class="memberrow"><div><div style="font-weight:700;font-size:14px;">' + escapeHtml(m.name) + '</div><div style="margin-top:3px;">' + badge + '</div></div>' + btn + '</div>';
+  });
+
+  let memberTable = '';
+  DB.members.forEach(function(m){
+    const role = m.id === SUPERADMIN_ID ? 'superadmin' : (m.role || 'member');
+    const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleDateString() : 'Never';
+    const delBtn = m.id === SUPERADMIN_ID ? '' : '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsDeleteMember(this.dataset.mid,this.dataset.mn)">Remove</button>';
+    memberTable += '<tr style="border-bottom:1px solid #f1ebe1;">'
+      + '<td style="padding:8px 4px;font-weight:600;font-size:13px;">' + escapeHtml(m.name) + '</td>'
+      + '<td style="padding:8px 4px;font-size:11px;color:' + (roleColor[role]||'var(--muted)') + ';font-weight:700;">' + role.toUpperCase() + '</td>'
+      + '<td style="padding:8px 4px;font-size:11px;color:var(--muted);">' + lastSeen + '</td>'
+      + '<td style="padding:8px 4px;">' + delBtn + '</td></tr>';
+  });
+
   const memberOptions = DB.members
-    .filter(m => m.id !== SUPERADMIN_ID)
-    .map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`)
+    .filter(function(m){ return m.id !== SUPERADMIN_ID; })
+    .map(function(m){ return '<option value="' + m.id + '">' + escapeHtml(m.name) + '</option>'; })
     .join('');
 
-  main.innerHTML = `
-    <div class="card">
-      <h2 style="color:var(--orange-dark);">👑 ADS Control Panel</h2>
-      <p class="muted" style="margin-bottom:14px;">Manage admin rights and view all conversations.</p>
+  main.innerHTML =
+    '<div class="card"><h2 style="color:var(--orange-dark);">👑 ADS Control Panel</h2>'
+    + '<p class="muted" style="margin-bottom:0;">Admin rights, member management, conversation viewer.</p></div>'
 
-      <div class="section-label">Member Roles</div>
-      ${memberRows}
-    </div>
+    + '<div class="card" style="margin-top:0;">'
+    + '<div class="section-label">➕ Add New Member</div>'
+    + '<div class="row"><input id="adsNewName" placeholder="Full name" style="margin-bottom:0;">'
+    + '<input id="adsNewPass" type="password" placeholder="PIN / Password" style="margin-bottom:0;"></div>'
+    + '<button class="btn-primary" style="margin-top:8px;" onclick="adsAddMember()">Add Member</button>'
+    + '<div class="section-label" style="margin-top:16px;">📋 Bulk Add (Name,PIN — one per line)</div>'
+    + '<textarea id="adsBulkInput" placeholder="Zainab Saifee,1234\nHusain Saifee,5678" style="width:100%;height:80px;padding:10px;border-radius:10px;border:1px solid #E5DDD2;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px;"></textarea>'
+    + '<button class="btn-secondary" onclick="adsBulkAdd()">Bulk Add Members</button>'
+    + '<div id="adsBulkResult" style="margin-top:8px;font-size:12px;color:var(--teal-dark);"></div></div>'
 
-    <div class="card" style="margin-top:0;">
-      <div class="section-label">View Any Conversation</div>
-      <p class="muted" style="font-size:12px;margin-bottom:10px;">Read-only — you cannot send messages from here.</p>
-      <div class="row" style="margin-bottom:10px;">
-        <select id="adsViewA" onchange="adsLoadThread()" style="margin-bottom:0;">
-          <option value="">— Member A —</option>
-          ${memberOptions}
-        </select>
-        <select id="adsViewB" onchange="adsLoadThread()" style="margin-bottom:0;">
-          <option value="">— Member B —</option>
-          ${memberOptions}
-        </select>
-      </div>
-      <div id="adsThreadArea" style="max-height:45vh;overflow-y:auto;background:#fdfaf5;border-radius:12px;padding:10px;">
-        <div class="empty-hint">Select two members to view their conversation.</div>
-      </div>
-    </div>
-  `;
+    + '<div class="card" style="margin-top:0;">'
+    + '<div class="section-label">👥 All Members (' + DB.members.length + ')</div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+    + '<thead><tr style="border-bottom:2px solid #e5ddd2;">'
+    + '<th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--muted);">NAME</th>'
+    + '<th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--muted);">ROLE</th>'
+    + '<th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--muted);">LAST SEEN</th>'
+    + '<th style="padding:6px 4px;"></th></tr></thead>'
+    + '<tbody>' + memberTable + '</tbody></table></div></div>'
+
+    + '<div class="card" style="margin-top:0;">'
+    + '<div class="section-label">🔑 Admin Rights</div>' + memberRows + '</div>'
+
+    + '<div class="card" style="margin-top:0;">'
+    + '<div class="section-label">👁 View Any Conversation (read-only)</div>'
+    + '<div class="row" style="margin-bottom:10px;">'
+    + '<select id="adsViewA" onchange="adsLoadThread()" style="margin-bottom:0;"><option value="">— Member A —</option>' + memberOptions + '</select>'
+    + '<select id="adsViewB" onchange="adsLoadThread()" style="margin-bottom:0;"><option value="">— Member B —</option>' + memberOptions + '</select>'
+    + '</div>'
+    + '<div id="adsThreadArea" style="max-height:45vh;overflow-y:auto;background:#fdfaf5;border-radius:12px;padding:10px;">'
+    + '<div class="empty-hint">Select two members to view their conversation.</div>'
+    + '</div></div>';
 }
 
+async function adsAddMember(){
+  const name = document.getElementById('adsNewName').value.trim();
+  const pass = document.getElementById('adsNewPass').value.trim();
+  if(!name || !pass){ showChatToast('Enter name and PIN.'); return; }
+  if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ showChatToast('Name already exists.'); return; }
+  // Use existing family (first family in DB — all Saifees are one family)
+  const familyId = DB.families[0]?.id;
+  if(!familyId){ showChatToast('No family found. Register a family first.'); return; }
+  const { data, error } = await sb.from('members').insert({family_id:familyId, name, password:String(pass), is_head:false, role:'member'}).select().single();
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  document.getElementById('adsNewName').value = '';
+  document.getElementById('adsNewPass').value = '';
+  await loadAll();
+  showChatToast('✅ ' + name + ' added!');
+  renderSuperAdmin();
+}
+
+async function adsBulkAdd(){
+  const lines = document.getElementById('adsBulkInput').value.trim().split('\n').filter(l=>l.trim());
+  if(!lines.length){ showChatToast('Enter at least one line.'); return; }
+  const familyId = DB.families[0]?.id;
+  if(!familyId){ showChatToast('No family found.'); return; }
+  const resultDiv = document.getElementById('adsBulkResult');
+  resultDiv.textContent = 'Adding...';
+  let added = 0, skipped = [];
+  for(const line of lines){
+    const parts = line.split(',');
+    if(parts.length < 2){ skipped.push(line.trim() + ' (bad format)'); continue; }
+    const name = parts[0].trim();
+    const pass = parts.slice(1).join(',').trim();
+    if(!name || !pass){ skipped.push(line.trim() + ' (empty)'); continue; }
+    if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ skipped.push(name + ' (already exists)'); continue; }
+    const { error } = await sb.from('members').insert({family_id:familyId, name, password:String(pass), is_head:false, role:'member'});
+    if(error){ skipped.push(name + ' (error: ' + error.message + ')'); } else { added++; }
+  }
+  await loadAll();
+  let msg = added + ' member(s) added.';
+  if(skipped.length) msg += ' Skipped: ' + skipped.join(', ');
+  resultDiv.textContent = msg;
+  if(added > 0){
+    document.getElementById('adsBulkInput').value = '';
+    renderSuperAdmin();
+    document.getElementById('adsBulkResult').textContent = msg;
+  }
+}
+
+async function adsDeleteMember(memberId, name){
+  if(memberId === SUPERADMIN_ID){ showChatToast('Cannot remove Super Admin.'); return; }
+  if(!confirm('Remove ' + name + '? This cannot be undone.')) return;
+  const { error } = await sb.from('members').delete().eq('id', memberId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast(name + ' removed.');
+  renderSuperAdmin();
+}
+
+
 async function grantAdmin(memberId, name){
-  if(!confirm(\`Make \${name} an Admin?\nThey will be able to create events, send reminders, and broadcast messages.\`)) return;
+  if(!confirm(`Make ${name} an Admin?\nThey will be able to create events, send reminders, and broadcast messages.`)) return;
   const { error } = await sb.from('members').update({ role: 'admin' }).eq('id', memberId);
   if(error){ showChatToast('❌ Error: ' + error.message); return; }
   await loadAll();
-  showChatToast(\`✅ \${name} is now an Admin\`);
+  showChatToast(`✅ ${name} is now an Admin`);
   renderSuperAdmin();
 }
 
 async function revokeAdmin(memberId, name){
-  if(!confirm(\`Remove Admin rights from \${name}?\`)) return;
+  if(!confirm(`Remove Admin rights from ${name}?`)) return;
   const { error } = await sb.from('members').update({ role: 'member' }).eq('id', memberId);
   if(error){ showChatToast('❌ Error: ' + error.message); return; }
   await loadAll();
-  showChatToast(\`✅ \${name} is now a regular Member\`);
+  showChatToast(`✅ ${name} is now a regular Member`);
   renderSuperAdmin();
 }
 
@@ -1553,10 +1624,13 @@ function adsLoadThread(){
     const time = new Date(m.sent_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const date = new Date(m.sent_at).toLocaleDateString();
     const isA = m.from_id === aId;
-    return \`<div style="margin-bottom:10px;">
-      <div style="font-size:10px;color:var(--muted);margin-bottom:2px;\${isA?'text-align:left':'text-align:right'}">\${fromName} · \${date} \${time}</div>
-      <div class="msgline \${isA?'msg-them':'msg-me'}" style="max-width:80%;\${isA?'':'margin-left:auto'}">\${sanitizeRichText(m.text)}</div>
-    </div>\`;
+    const align = isA ? 'text-align:left' : 'text-align:right';
+    const cls = isA ? 'msg-them' : 'msg-me';
+    const ml = isA ? '' : 'margin-left:auto';
+    return '<div style="margin-bottom:10px;">'
+      + '<div style="font-size:10px;color:var(--muted);margin-bottom:2px;' + align + '">' + fromName + ' · ' + date + ' ' + time + '</div>'
+      + '<div class="msgline ' + cls + '" style="max-width:80%;' + ml + '">' + sanitizeRichText(m.text) + '</div>'
+      + '</div>';
   }).join('');
   area.scrollTop = area.scrollHeight;
 }
