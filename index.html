@@ -185,7 +185,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "2.9";
+const APP_VERSION = "3.0";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -269,18 +269,20 @@ function clearSession(){ try{ localStorage.removeItem('saifees_session'); }catch
 
 /* ================= Data access (Supabase) ================= */
 async function loadAll(){
-  const [fam, mem, ev, vt, ms, nt] = await Promise.all([
+  const [fam, mem, ev, vt, ms, nt, hh] = await Promise.all([
     sb.from('families').select('*'),
     sb.from('members').select('*'),
     sb.from('events').select('*'),
     sb.from('votes').select('*'),
     sb.from('messages').select('*').order('sent_at', {ascending:true}),
     sb.from('notifications').select('*').order('at', {ascending:false}),
+    sb.from('households').select('*'),
   ]);
   if(fam.error) throw fam.error;
   DB = {
     families: fam.data||[], members: mem.data||[], events: ev.data||[],
-    votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[], reminders: []
+    votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[],
+    reminders: [], households: hh.data||[]
   };
   if(session && session.role!=='admin' && session.role!=='superadmin' && session.memberId){
     const { data } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
@@ -295,6 +297,16 @@ function nameTaken(name, exceptId){
   return DB.members.some(m => m.name.toLowerCase()===name.toLowerCase() && m.id!==exceptId);
 }
 function membersOfFamily(familyId){ return DB.members.filter(m=>m.family_id===familyId); }
+function membersOfHousehold(householdId){ return DB.members.filter(m=>m.household_id===householdId); }
+function myHousehold(){ return DB.households.find(h=>h.id===session.household_id) || null; }
+function myHouseholdMembers(){
+  if(!session) return [];
+  // Find the household this member belongs to
+  const me = DB.members.find(m=>m.id===session.memberId);
+  if(!me || !me.household_id) return [me].filter(Boolean);
+  return membersOfHousehold(me.household_id);
+}
+function hhName(id){ return (DB.households.find(h=>h.id===id)||{}).name||''; }
 function findMember(id){ return DB.members.find(m=>m.id===id); }
 function famName(id){ return (DB.families.find(f=>f.id===id)||{}).name || ''; }
 
@@ -344,7 +356,7 @@ async function loginUser(username, password){
   if(byUsername){
     await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', byUsername.id);
     const role = byUsername.id === SUPERADMIN_ID ? 'superadmin' : (byUsername.role || 'member');
-    return { familyId: byUsername.family_id, memberId: byUsername.id, name: byUsername.name, username: byUsername.username, role };
+    return { familyId: byUsername.family_id, memberId: byUsername.id, name: byUsername.name, username: byUsername.username, role, household_id: byUsername.household_id||null };
   }
   // FALLBACK: match by first name (for existing members without username set yet)
   const firstName = username.trim().split(' ')[0].toLowerCase();
@@ -352,7 +364,7 @@ async function loginUser(username, password){
   if(byFirstName){
     await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', byFirstName.id);
     const role = byFirstName.id === SUPERADMIN_ID ? 'superadmin' : (byFirstName.role || 'member');
-    return { familyId: byFirstName.family_id, memberId: byFirstName.id, name: byFirstName.name, username: byFirstName.username||firstName, role };
+    return { familyId: byFirstName.family_id, memberId: byFirstName.id, name: byFirstName.name, username: byFirstName.username||firstName, role, household_id: byFirstName.household_id||null };
   }
   return {error:'Username or password is incorrect.'};
 }
@@ -540,6 +552,7 @@ async function boot(){
       const freshMember = DB.members.find(m => m.id === session.memberId);
       if(freshMember && freshMember.role){
         session.role = freshMember.role;
+        session.household_id = freshMember.household_id || null;
         saveSession();
       }
     }
@@ -719,7 +732,7 @@ async function doLogin(){
   if(!username || !password){ showChatToast('Enter username and password.'); return; }
   const res = await loginUser(username, password);
   if(res.error){ showChatToast('❌ ' + res.error); return; }
-  session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name, username:res.username};
+  session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name, username:res.username, household_id:res.household_id||null};
   saveSession();
   registerPushForMember(res.memberId);
   await loadAll();
@@ -1197,37 +1210,45 @@ function adminFamilyBreakdown(eventId){
 /* ================= VOTE ================= */
 function renderVote(){
   const main = document.getElementById('main');
-  if(session.role==='admin'||session.role==='superadmin'){
-    main.innerHTML = `<div class="card"><h2>Voting is per-family</h2><div class="muted">Log in as a family to vote. Use the Admin tab to manage events.</div></div>`;
-    return;
-  }
-  const openEvents = DB.events.filter(e=>e.status!=='closed' && new Date(e.deadline) > new Date());
+  const openEvents  = DB.events.filter(e=>e.status!=='closed' && new Date(e.deadline) > new Date());
   const closedEvents = DB.events.filter(e=>e.status==='closed' || new Date(e.deadline) <= new Date());
-  const myFamilyMembers = membersOfFamily(session.familyId);
-  main.innerHTML = `
-    <div class="card">
-      <h2>My family members</h2>
-      ${myFamilyMembers.map(m=>`<div class="memberrow"><span>${escapeHtml(m.name)}${m.is_head?' <span class="muted">(head)</span>':''}</span></div>`).join('')}
-      <div class="row" style="margin-top:8px;">
-        <input id="newMemberName" placeholder="Add family member name">
-        <input id="newMemberPass" type="password" placeholder="Their password (optional)">
-      </div>
-      <button class="btn-secondary" onclick="doAddMember()">+ Add member</button>
-    </div>
-    <div class="card">
-      <h2>Open events</h2>
-      ${openEvents.length? openEvents.map(e=>`
-        <div class="memberrow">
-          <span>${new Date(e.g_date).toDateString()}<br><span class="muted">Deadline: ${new Date(e.deadline).toLocaleString()}</span></span>
-          <button class="btn-primary btn-small" onclick="openVoteGrid('${e.id}')">Vote</button>
-        </div>`).join('') : '<div class="muted">No open events right now.</div>'}
-    </div>
-    <div id="voteGrid"></div>
-    <div class="card">
-      <h2>Past / closed events</h2>
-      ${closedEvents.length? closedEvents.map(e=>`<div class="memberrow"><span>${new Date(e.g_date).toDateString()}</span><span class="muted">Closed</span></div>`).join('') : '<div class="muted">None yet.</div>'}
-    </div>
-  `;
+
+  // My household members (including myself)
+  const me = DB.members.find(m=>m.id===session.memberId);
+  const hhMembers = myHouseholdMembers();
+  const hhLabel = me && me.household_id ? hhName(me.household_id) : 'My Household';
+
+  // Household info card
+  const hhCard = '<div class="card">'
+    + '<h2>' + escapeHtml(hhLabel) + '</h2>'
+    + '<p class="muted" style="margin-bottom:10px;font-size:12px;">You can vote for all members in your household.</p>'
+    + (hhMembers.length
+        ? hhMembers.map(m=>'<div class="memberrow"><span>' + escapeHtml(m.name)
+            + (m.id===session.memberId ? ' <span class="tag" style="background:var(--teal-light);color:var(--teal-dark);font-size:10px;">You</span>' : '')
+            + '</span></div>').join('')
+        : '<div class="muted">You are not assigned to a household yet.<br>Ask ADS to assign you.</div>')
+    + '</div>';
+
+  // Open events
+  const openCard = '<div class="card">'
+    + '<h2>Open Events</h2>'
+    + (openEvents.length
+        ? openEvents.map(e=>'<div class="memberrow">'
+            + '<span>' + new Date(e.g_date).toDateString() + '<br><span class="muted">Deadline: ' + new Date(e.deadline).toLocaleString() + '</span></span>'
+            + '<button class="btn-primary btn-small" data-eid="' + e.id + '" onclick="openVoteGrid(this.dataset.eid)">Vote</button>'
+            + '</div>').join('')
+        : '<div class="muted">No open events right now.</div>')
+    + '</div>';
+
+  // Closed events
+  const closedCard = '<div class="card">'
+    + '<h2>Past Events</h2>'
+    + (closedEvents.length
+        ? closedEvents.map(e=>'<div class="memberrow"><span>' + new Date(e.g_date).toDateString() + '</span><span class="muted">Closed</span></div>').join('')
+        : '<div class="muted">None yet.</div>')
+    + '</div>';
+
+  main.innerHTML = hhCard + openCard + '<div id="voteGrid"></div>' + closedCard;
 }
 async function doAddMember(){
   const name = document.getElementById('newMemberName').value.trim();
@@ -1239,30 +1260,63 @@ async function doAddMember(){
   renderVote();
 }
 function openVoteGrid(eventId){
-  const fam = membersOfFamily(session.familyId);
-  const rows = fam.map(m=>{
+  const ev = DB.events.find(e=>e.id===eventId);
+  if(!ev) return;
+  const hhMembers = myHouseholdMembers();
+  const isAdmin = session.role==='admin'||session.role==='superadmin';
+  // Admins see all members; regular members see their household
+  const voterList = isAdmin ? DB.members : hhMembers;
+
+  let rows = '';
+  voterList.forEach(function(m){
     const lv = DB.votes.find(v=>v.event_id===eventId && v.member_id===m.id && v.meal==='Lunch');
     const dv = DB.votes.find(v=>v.event_id===eventId && v.member_id===m.id && v.meal==='Dinner');
-    return `<div class="memberrow">
-      <span>${escapeHtml(m.name)}</span>
-      <span class="row" style="gap:4px;">
-        <button class="pill ${lv&&lv.response==='Yes'?'on':''}" onclick="castVote('${eventId}','${m.id}','Lunch','Yes')">L:Yes</button>
-        <button class="pill ${lv&&lv.response==='No'?'off':''}" onclick="castVote('${eventId}','${m.id}','Lunch','No')">L:No</button>
-        <button class="pill ${dv&&dv.response==='Yes'?'on':''}" onclick="castVote('${eventId}','${m.id}','Dinner','Yes')">D:Yes</button>
-        <button class="pill ${dv&&dv.response==='No'?'off':''}" onclick="castVote('${eventId}','${m.id}','Dinner','No')">D:No</button>
-      </span>
-    </div>`;
-  }).join('');
-  document.getElementById('voteGrid').innerHTML = `<div class="card"><h2>${new Date(DB.events.find(e=>e.id===eventId).g_date).toDateString()}</h2>${rows}</div>`;
+    const isMe = m.id === session.memberId;
+    const submitterL = lv && lv.submitted_by ? DB.members.find(x=>x.id===lv.submitted_by) : null;
+    const submitterD = dv && dv.submitted_by ? DB.members.find(x=>x.id===dv.submitted_by) : null;
+    const byLabelL = submitterL && submitterL.id!==m.id ? '<span class="muted" style="font-size:10px;"> by ' + escapeHtml(submitterL.name.split(' ')[0]) + '</span>' : '';
+    const byLabelD = submitterD && submitterD.id!==m.id ? '<span class="muted" style="font-size:10px;"> by ' + escapeHtml(submitterD.name.split(' ')[0]) + '</span>' : '';
+    const hhTag = m.household_id ? '<span class="muted" style="font-size:10px;"> · ' + hhName(m.household_id) + '</span>' : '';
+    rows += '<div class="memberrow" style="flex-wrap:wrap;gap:6px;">'
+      + '<div style="min-width:100px;">'
+      + '<div style="font-weight:' + (isMe?'700':'500') + ';">' + escapeHtml(m.name) + (isMe?' <span class="tag" style="background:var(--teal-light);color:var(--teal-dark);font-size:9px;">You</span>':'') + '</div>'
+      + (isAdmin ? hhTag : '')
+      + '</div>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">'
+      + '🍽 <button class="pill ' + (lv&&lv.response==='Yes'?'on':'') + '" data-eid="' + eventId + '" data-mid="' + m.id + '" data-meal="Lunch" data-resp="Yes" onclick="castVoteBtn(this)">Lunch ✓</button>'
+      + '<button class="pill ' + (lv&&lv.response==='No'?'off':'') + '" data-eid="' + eventId + '" data-mid="' + m.id + '" data-meal="Lunch" data-resp="No" onclick="castVoteBtn(this)">Lunch ✗</button>'
+      + byLabelL
+      + '&nbsp;🌙 <button class="pill ' + (dv&&dv.response==='Yes'?'on':'') + '" data-eid="' + eventId + '" data-mid="' + m.id + '" data-meal="Dinner" data-resp="Yes" onclick="castVoteBtn(this)">Dinner ✓</button>'
+      + '<button class="pill ' + (dv&&dv.response==='No'?'off':'') + '" data-eid="' + eventId + '" data-mid="' + m.id + '" data-meal="Dinner" data-resp="No" onclick="castVoteBtn(this)">Dinner ✗</button>'
+      + byLabelD
+      + '</div></div>';
+  });
+
+  const dateStr = new Date(ev.g_date).toDateString();
+  document.getElementById('voteGrid').innerHTML =
+    '<div class="card">'
+    + '<h2>📋 ' + dateStr + '</h2>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Voting for your household — "by Name" shows who submitted on their behalf.</p>'
+    + rows
+    + '</div>';
+  document.getElementById('voteGrid').scrollIntoView({behavior:'smooth', block:'start'});
 }
-async function castVote(eventId, memberId, meal, response){
+async function castVoteBtn(btn){
+  const eventId = btn.dataset.eid;
+  const memberId = btn.dataset.mid;
+  const meal = btn.dataset.meal;
+  const response = btn.dataset.resp;
   const ev = DB.events.find(e=>e.id===eventId);
-  if(new Date(ev.deadline) <= new Date() || ev.status==='closed'){ alert('Voting is closed for this date.'); return; }
+  if(!ev || new Date(ev.deadline)<=new Date() || ev.status==='closed'){
+    showChatToast('Voting is closed for this event.'); return;
+  }
+  btn.disabled = true;
   const res = await castVoteRow(eventId, memberId, meal, response, session.memberId);
-  if(res.error) return alert(res.error);
+  if(res && res.error){ showChatToast('❌ ' + res.error); btn.disabled=false; return; }
   await loadAll();
   openVoteGrid(eventId);
 }
+// castVote replaced by castVoteBtn (data-attribute based)
 
 /* ================= PRESENCE ================= */
 function renderPresence(){
@@ -1622,6 +1676,10 @@ function renderSuperAdmin(){
     + '<tbody>' + memberTable + '</tbody></table></div></div>'
 
     + '<div class="card" style="margin-top:0;">'
+    + '<div class="section-label">🏠 Households</div>'
+    + '<div id="hhManageArea">' + buildHouseholdManageHTML() + '</div>'
+    + '</div>'
+    + '<div class="card" style="margin-top:0;">'
     + '<div class="section-label">🔑 Admin Rights</div>' + memberRows + '</div>'
 
     + '<div class="card" style="margin-top:0;">'
@@ -1633,6 +1691,130 @@ function renderSuperAdmin(){
     + '<div id="adsThreadArea" style="max-height:45vh;overflow-y:auto;background:#fdfaf5;border-radius:12px;padding:10px;">'
     + '<div class="empty-hint">Select two members to view their conversation.</div>'
     + '</div></div>';
+}
+
+function buildHouseholdManageHTML(){
+  let html = '';
+
+  // Create new household form
+  const memberOpts = DB.members.map(function(m){
+    return '<option value="' + m.id + '">' + escapeHtml(m.name) + '</option>';
+  }).join('');
+
+  html += '<div style="margin-bottom:14px;">'
+    + '<div class="row" style="margin-bottom:8px;">'
+    + '<input id="hhNewName" placeholder="Household name (e.g. Ali Household)" style="margin-bottom:0;">'
+    + '<select id="hhNewHead" style="margin-bottom:0;"><option value="">— Head (optional) —</option>' + memberOpts + '</select>'
+    + '</div>'
+    + '<button class="btn-primary btn-small" onclick="adsCreateHousehold()">Create Household</button>'
+    + '</div>';
+
+  if(!DB.households || !DB.households.length){
+    html += '<div class="empty-hint">No households yet. Create one above.</div>';
+    return html;
+  }
+
+  // Each household card
+  DB.households.forEach(function(hh){
+    const head = DB.members.find(function(m){ return m.id === hh.head_id; });
+    const members = DB.members.filter(function(m){ return m.household_id === hh.id; });
+
+    // Member assign dropdowns — show unassigned members
+    const unassigned = DB.members.filter(function(m){ return !m.household_id; });
+    const assignOpts = unassigned.map(function(m){
+      return '<option value="' + m.id + '">' + escapeHtml(m.name) + '</option>';
+    }).join('');
+
+    html += '<div style="background:#fdfaf5;border-radius:12px;padding:12px;margin-bottom:10px;border:1px solid #e5ddd2;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      + '<div>'
+      + '<div style="font-weight:700;font-size:14px;">🏠 ' + escapeHtml(hh.name) + '</div>'
+      + (head ? '<div style="font-size:11px;color:var(--muted);">Head: ' + escapeHtml(head.name) + '</div>' : '')
+      + '</div>'
+      + '<button class="btn-secondary btn-small" style="color:#e74c3c;" data-hhid="' + hh.id + '" data-hhname="' + escapeHtml(hh.name) + '" onclick="adsDeleteHousehold(this.dataset.hhid,this.dataset.hhname)">Delete</button>'
+      + '</div>';
+
+    // Current members list
+    if(members.length){
+      html += '<div style="margin-bottom:8px;">';
+      members.forEach(function(m){
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #f0ebe2;">'
+          + '<span style="font-size:13px;">' + escapeHtml(m.name) + '</span>'
+          + '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsUnassignMember(this.dataset.mid,this.dataset.mn)">Remove</button>'
+          + '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div class="muted" style="font-size:12px;margin-bottom:8px;">No members yet.</div>';
+    }
+
+    // Add member to this household
+    if(unassigned.length){
+      html += '<div class="row" style="margin-top:6px;">'
+        + '<select id="hhAssign_' + hh.id + '" style="margin-bottom:0;"><option value="">— Add member —</option>' + assignOpts + '</select>'
+        + '<button class="btn-secondary btn-small" data-hhid="' + hh.id + '" onclick="adsAssignMember(this.dataset.hhid)">Add</button>'
+        + '</div>';
+    }
+
+    html += '</div>';
+  });
+
+  // Show unassigned members
+  const unassigned2 = DB.members.filter(function(m){ return !m.household_id; });
+  if(unassigned2.length){
+    html += '<div style="margin-top:10px;padding:10px;background:#fff8f0;border-radius:10px;border:1px solid #f0ddc0;">'
+      + '<div style="font-size:12px;font-weight:700;color:var(--orange-dark);margin-bottom:6px;">⚠️ Unassigned Members</div>'
+      + unassigned2.map(function(m){ return '<div style="font-size:12px;color:var(--muted);padding:2px 0;">' + escapeHtml(m.name) + '</div>'; }).join('')
+      + '</div>';
+  }
+
+  return html;
+}
+
+async function adsCreateHousehold(){
+  const name = (document.getElementById('hhNewName')?.value||'').trim();
+  const headId = document.getElementById('hhNewHead')?.value || null;
+  if(!name){ showChatToast('Enter a household name.'); return; }
+  if(DB.households.some(function(h){ return h.name.toLowerCase()===name.toLowerCase(); })){
+    showChatToast('Household name already exists.'); return;
+  }
+  const { error } = await sb.from('households').insert({ name, head_id: headId||null });
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast('✅ Household "' + name + '" created!');
+  renderSuperAdmin();
+}
+
+async function adsAssignMember(householdId){
+  const sel = document.getElementById('hhAssign_' + householdId);
+  const memberId = sel ? sel.value : '';
+  if(!memberId){ showChatToast('Select a member to add.'); return; }
+  const m = DB.members.find(function(x){ return x.id===memberId; });
+  const { error } = await sb.from('members').update({ household_id: householdId }).eq('id', memberId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast('✅ ' + (m?m.name:'Member') + ' added to household.');
+  renderSuperAdmin();
+}
+
+async function adsUnassignMember(memberId, name){
+  if(!confirm('Remove ' + name + ' from their household?')) return;
+  const { error } = await sb.from('members').update({ household_id: null }).eq('id', memberId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast(name + ' removed from household.');
+  renderSuperAdmin();
+}
+
+async function adsDeleteHousehold(hhId, name){
+  if(!confirm('Delete household "' + name + '"? Members will be unassigned.')) return;
+  // Unassign all members first
+  await sb.from('members').update({ household_id: null }).eq('household_id', hhId);
+  const { error } = await sb.from('households').delete().eq('id', hhId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast('✅ Household deleted.');
+  renderSuperAdmin();
 }
 
 async function adsAddMember(){
