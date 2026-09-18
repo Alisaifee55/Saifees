@@ -77,6 +77,31 @@
   .day-popover .dpop-title{font-weight:800;color:var(--teal-dark);margin-bottom:6px;font-size:13px;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
   .calday{border-radius:10px;padding:4px 2px 5px;min-height:52px;background:#fdfaf5;position:relative;}
+
+/* ── Calendar page-turn animation ── */
+.calgrid-wrap{overflow:hidden;position:relative;}
+@keyframes pageSlideInRight{
+  0%  {opacity:0; transform:translateX(60px) rotateY(-18deg) scale(0.96); filter:blur(1.5px);}
+  60% {opacity:1; filter:blur(0);}
+  100%{opacity:1; transform:translateX(0)  rotateY(0deg)   scale(1);}
+}
+@keyframes pageSlideInLeft{
+  0%  {opacity:0; transform:translateX(-60px) rotateY(18deg) scale(0.96); filter:blur(1.5px);}
+  60% {opacity:1; filter:blur(0);}
+  100%{opacity:1; transform:translateX(0)  rotateY(0deg)  scale(1);}
+}
+@keyframes pageSlideOutLeft{
+  0%  {opacity:1; transform:translateX(0)    rotateY(0deg)  scale(1);}
+  100%{opacity:0; transform:translateX(-60px) rotateY(18deg) scale(0.96); filter:blur(1.5px);}
+}
+@keyframes pageSlideOutRight{
+  0%  {opacity:1; transform:translateX(0)   rotateY(0deg)   scale(1);}
+  100%{opacity:0; transform:translateX(60px) rotateY(-18deg) scale(0.96); filter:blur(1.5px);}
+}
+.cal-page-in-next  {animation:pageSlideInRight  .38s cubic-bezier(.22,.68,0,1.2) forwards;}
+.cal-page-in-prev  {animation:pageSlideInLeft   .38s cubic-bezier(.22,.68,0,1.2) forwards;}
+.cal-page-out-next {animation:pageSlideOutLeft  .22s cubic-bezier(.4,0,1,1)      forwards;}
+.cal-page-out-prev {animation:pageSlideOutRight .22s cubic-bezier(.4,0,1,1)      forwards;}
   .calday .h{font-size:22px;font-weight:700;color:var(--teal);margin-top:1px;font-family:'FatemiQanz','Segoe UI',sans-serif;}
   .calday .g{font-size:10px;color:var(--muted);margin-top:2px;}
   .calday.today{background:var(--orange-light);border:2px solid var(--orange);}
@@ -160,7 +185,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -313,22 +338,23 @@ async function registerFamily(name, headName, password){
   if(e2) return {error:e2.message};
   return { familyId: fam.id, memberId: mem.id, name: mem.name, role: 'head' };
 }
-async function loginUser(name, password){
-  const fam = DB.families.find(f=>f.name.toLowerCase()===name.toLowerCase() && String(f.password)===String(password));
-  if(fam){
-    const head = DB.members.find(m=>m.family_id===fam.id && m.is_head);
-    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', head.id);
-    // Role from DB; superadmin always = ADS
-    const role = head.id === SUPERADMIN_ID ? 'superadmin' : (head.role || 'member');
-    return { familyId: fam.id, memberId: head.id, name: head.name, role };
+async function loginUser(username, password){
+  // PRIMARY: match by username field (clean, unique, no ambiguity)
+  const byUsername = DB.members.find(m => m.username && m.username.toLowerCase()===username.toLowerCase() && String(m.password)===String(password));
+  if(byUsername){
+    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', byUsername.id);
+    const role = byUsername.id === SUPERADMIN_ID ? 'superadmin' : (byUsername.role || 'member');
+    return { familyId: byUsername.family_id, memberId: byUsername.id, name: byUsername.name, username: byUsername.username, role };
   }
-  const mem = DB.members.find(m=>m.name.toLowerCase()===name.toLowerCase() && String(m.password)===String(password) && !m.is_head);
-  if(mem){
-    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', mem.id);
-    const role = mem.id === SUPERADMIN_ID ? 'superadmin' : (mem.role || 'member');
-    return { familyId: mem.family_id, memberId: mem.id, name: mem.name, role };
+  // FALLBACK: match by first name (for existing members without username set yet)
+  const firstName = username.trim().split(' ')[0].toLowerCase();
+  const byFirstName = DB.members.find(m => m.name.toLowerCase().startsWith(firstName) && String(m.password)===String(password));
+  if(byFirstName){
+    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', byFirstName.id);
+    const role = byFirstName.id === SUPERADMIN_ID ? 'superadmin' : (byFirstName.role || 'member');
+    return { familyId: byFirstName.family_id, memberId: byFirstName.id, name: byFirstName.name, username: byFirstName.username||firstName, role };
   }
-  return {error:'No match found.'};
+  return {error:'Username or password is incorrect.'};
 }
 async function addMember(familyId, name, password){
   if(nameTaken(name)) return {error:'That name is already used by someone else.'};
@@ -369,7 +395,8 @@ async function sendChatMessage(fromId, toId, text){
   if(error) return {error:error.message};
   const sender = findMember(fromId);
   await addNotification(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`);
-  sendPush(toId, `New message from ${sender?sender.name:'someone'}: "${text}"`, {type:'chat', fromId});
+  const pushText = (text||"").replace(/<[^>]*>/g,"").replace(/&nbsp;/g," ").replace(/&amp;/g,"&").trim().slice(0,80);
+  sendPush(toId, (sender?sender.name:"Someone") + ": " + (pushText||"New message"), {type:'chat', fromId});
   return {ok:true};
 }
 async function markMessagesRead(fromId, toId){
@@ -589,7 +616,7 @@ function render(){
         <div class="who">${session ? escapeHtml(session.name)+' · '+session.role : 'Not logged in'} <span style="opacity:.6;">· v${APP_VERSION}</span></div>
       </div>
       <div style="display:flex;align-items:center;gap:14px;">
-        ${session && session.role!=='admin'&&session.role!=='superadmin' ? bellHtml() : ''}
+        ${session ? bellHtml() : ''}
         ${session ? `<a class="link" style="color:#fff;" onclick="doLogout()">Logout</a>` : ''}
       </div>
     </header>
@@ -628,9 +655,9 @@ function tabbarHtml(){
   const tabs = [
     {id:'calendar', icon:'📅', label:'Calendar'},
     {id:'vote', icon:'✅', label:'Vote'},
-    {id:'presence', icon:'👥', label:'Presence'},
     {id:'messages', icon:'💬', label:'Messages', badge: msgBadge},
   ];
+  if(session.role==='admin' || session.role==='superadmin') tabs.push({id:'presence', icon:'👥', label:'Presence'});
   if(session.role==='admin' || session.role==='superadmin') tabs.push({id:'admin', icon:'⚙️', label:'Admin'});
   if(session.role==='superadmin') tabs.push({id:'superadmin', icon:'👑', label:'ADS'});
   return `<div class="tabbar">${tabs.map(t=>`
@@ -647,51 +674,80 @@ let authMode = 'login';
 function renderAuth(){
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="card">
-      <h2>Welcome</h2>
-      <div class="row" style="margin-bottom:10px;">
-        <button class="btn-secondary btn-small" onclick="authMode='login';render()">Family / Member Login</button>
-        <button class="btn-secondary btn-small" onclick="authMode='registerFamily';render()">Register Family</button>
+    <div class="card" style="margin-top:20px;">
+      <div style="text-align:center;margin-bottom:18px;">
+        <img src="logo-transparent.png" style="height:56px;margin-bottom:8px;display:block;margin-left:auto;margin-right:auto;">
+        <div style="font-size:20px;font-weight:800;color:var(--teal-dark);">Saifee's Calendar</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">Family Portal</div>
       </div>
-      <div id="authbody" style="margin-top:14px;"></div>
+      <div id="authbody"></div>
+            <div style="text-align:center;margin-top:14px;">
+        <a class="link" id="authToggleLink" style="font-size:12px;"></a>
+      </div>
     </div>`;
   const body = document.getElementById('authbody');
+  const toggleLink = document.getElementById('authToggleLink');
+  if(toggleLink){
+    if(authMode==='login'){
+      toggleLink.textContent = 'New member? Register here';
+      toggleLink.onclick = function(){ authMode='register'; render(); };
+    } else {
+      toggleLink.innerHTML = '&larr; Back to Login';
+      toggleLink.onclick = function(){ authMode='login'; render(); };
+    }
+  }
   if(authMode==='login'){
     body.innerHTML = `
-      <input id="loginName" placeholder="Family name or your unique member name">
-      <input id="loginPass" type="password" placeholder="Password">
+      <input id="loginName" placeholder="Username (e.g. hakim)" autocomplete="username" autocapitalize="off">
+      <input id="loginPass" type="password" placeholder="Password / PIN" autocomplete="current-password">
       <button class="btn-primary" onclick="doLogin()">Login</button>`;
-  } else if(authMode==='registerFamily'){
+    document.getElementById('loginName').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('loginPass').focus(); });
+    document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  } else if(authMode==='register'){
     body.innerHTML = `
-      <input id="regFamilyName" placeholder="Family name (must be unique)">
-      <input id="regHeadName" placeholder="Your name (family head)">
-      <input id="regPass" type="password" placeholder="Choose a password">
-      <button class="btn-primary" onclick="doRegisterFamily()">Register Family</button>`;
+      <input id="regFullName" placeholder="Full name (e.g. Hakim Saifee)" autocapitalize="words">
+      <input id="regUsername" placeholder="Choose a username (e.g. hakim)" autocapitalize="off" autocomplete="username">
+      <input id="regPass" type="password" placeholder="Choose a PIN or password" autocomplete="new-password">
+      <input id="regFamilyPass" type="password" placeholder="Family password (ask family head)">
+      <button class="btn-primary" onclick="doRegisterMember()">Create Account</button>`;
   }
 }
-async function doRegisterFamily(){
-  const name = document.getElementById('regFamilyName').value.trim();
-  const headName = document.getElementById('regHeadName').value.trim();
-  const password = document.getElementById('regPass').value;
-  if(!name || !headName || !password) return alert('Please fill all fields.');
-  const res = await registerFamily(name, headName, password);
-  if(res.error) return alert(res.error);
-  session = {role:'head', familyId:res.familyId, memberId:res.memberId, name:res.name};
+// doRegisterFamily moved to ADS Control Panel
+async function doLogin(){
+  const username = document.getElementById('loginName').value.trim();
+  const password = document.getElementById('loginPass').value;
+  if(!username || !password){ showChatToast('Enter username and password.'); return; }
+  const res = await loginUser(username, password);
+  if(res.error){ showChatToast('❌ ' + res.error); return; }
+  session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name, username:res.username};
   saveSession();
   registerPushForMember(res.memberId);
   await loadAll();
-  authMode='login';
   render();
 }
-async function doLogin(){
-  const name = document.getElementById('loginName').value.trim();
-  const password = document.getElementById('loginPass').value;
-  const res = await loginUser(name, password);
-  if(res.error) return alert(res.error);
-  session = {role:res.role, familyId:res.familyId, memberId:res.memberId, name:res.name};
-  saveSession();
-  registerPushForMember(res.memberId);
+async function doRegisterMember(){
+  const fullName  = (document.getElementById('regFullName')?.value||'').trim();
+  const username  = (document.getElementById('regUsername')?.value||'').trim().toLowerCase().replace(/\s+/g,'');
+  const password  = (document.getElementById('regPass')?.value||'');
+  const famPass   = (document.getElementById('regFamilyPass')?.value||'');
+  if(!fullName||!username||!password||!famPass){ showChatToast('Please fill all fields.'); return; }
+  if(!/^[a-z0-9_]+$/.test(username)){ showChatToast('Username: letters, numbers, _ only.'); return; }
+  // Verify family password
+  const fam = DB.families.find(f => String(f.password)===String(famPass));
+  if(!fam){ showChatToast('❌ Wrong family password.'); return; }
+  // Check username unique
+  if(DB.members.some(m => m.username && m.username.toLowerCase()===username)){ showChatToast('❌ Username already taken.'); return; }
+  // Check full name unique
+  if(DB.members.some(m => m.name.toLowerCase()===fullName.toLowerCase())){ showChatToast('❌ Full name already registered.'); return; }
+  const { data, error } = await sb.from('members').insert({
+    family_id: fam.id, name: fullName, username, password: String(password), is_head: false, role: 'member'
+  }).select().single();
+  if(error){ showChatToast('❌ ' + error.message); return; }
+  showChatToast('✅ Account created! Logging you in...');
   await loadAll();
+  session = {role:'member', familyId:fam.id, memberId:data.id, name:fullName, username};
+  saveSession();
+  registerPushForMember(data.id);
   render();
 }
 // doAdminLogin removed — admin access via DB role only
@@ -829,15 +885,61 @@ function showDayPreview(dateKey, cellEl){
   pop.classList.remove('show');
   requestAnimationFrame(()=> requestAnimationFrame(()=> pop.classList.add('show')));
 }
+// Page-turn sound via Web Audio API (no external file needed)
+function playPageTurnSound(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for(let i=0;i<data.length;i++){
+      // White noise with fast exponential decay — sounds like paper rustle
+      data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 2.5) * 0.35;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    // Band-pass filter to make it crispier like paper
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 2800;
+    filter.Q.value = 0.7;
+    src.connect(filter);
+    filter.connect(ctx.destination);
+    src.start();
+    src.stop(ctx.currentTime + 0.18);
+  }catch(e){ /* AudioContext not available */ }
+}
+
 function shiftMonth(delta){
   closeDayPopover();
-  if(delta === 0){ hijriViewY = null; }
-  else {
+  if(delta === 0){
+    hijriViewY = null;
+    render();
+    return;
+  }
+  // Animate out existing grid
+  const wrap = document.getElementById('calGridWrap');
+  if(wrap){
+    const outClass = delta > 0 ? 'cal-page-out-next' : 'cal-page-out-prev';
+    wrap.classList.add(outClass);
+    playPageTurnSound();
+    setTimeout(()=>{
+      hijriViewM += delta;
+      if(hijriViewM < 1){ hijriViewM = 12; hijriViewY--; }
+      else if(hijriViewM > 12){ hijriViewM = 1; hijriViewY++; }
+      render();
+      // Animate in new grid
+      const newWrap = document.getElementById('calGridWrap');
+      if(newWrap){
+        const inClass = delta > 0 ? 'cal-page-in-next' : 'cal-page-in-prev';
+        newWrap.classList.add(inClass);
+      }
+    }, 200);
+  } else {
     hijriViewM += delta;
     if(hijriViewM < 1){ hijriViewM = 12; hijriViewY--; }
     else if(hijriViewM > 12){ hijriViewM = 1; hijriViewY++; }
+    render();
   }
-  render();
 }
 function attachCalendarSwipe(){
   const wrap = document.getElementById('calGridWrap');
@@ -1188,7 +1290,7 @@ function renderPresence(){
 /* ================= MESSAGES ================= */
 function renderMessages(){
   const main = document.getElementById('main');
-  const permGranted = !!(window.OneSignal && OneSignal.Notifications && OneSignal.Notifications.permission === true);
+  const permGranted = (typeof Notification !== 'undefined' && Notification.permission === 'granted');
   main.innerHTML = `
     <div class="row" style="margin-bottom:10px;">
       ${permGranted
@@ -1333,9 +1435,12 @@ function sanitizeRichText(html){
           return;
         }
         [...child.attributes].forEach(attr=>{
-          if(child.tagName==='SPAN' && attr.name==='style'){
-            const m = attr.value.match(/color:\s*[^;]+/);
-            if(m) child.setAttribute('style', m[0]); else child.removeAttribute('style');
+          if((child.tagName==='SPAN'||child.tagName==='DIV') && attr.name==='style'){
+            // Keep only color and background-color — strip everything else
+            const colorM = attr.value.match(/(?:^|;)\s*(color:\s*[^;]+)/);
+            const bgM    = attr.value.match(/(?:^|;)\s*(background-color:\s*[^;]+)/);
+            const kept = [colorM?colorM[1].trim():'', bgM?bgM[1].trim():''].filter(Boolean).join(';');
+            if(kept) child.setAttribute('style', kept); else child.removeAttribute('style');
           } else {
             child.removeAttribute(attr.name);
           }
@@ -1475,12 +1580,15 @@ function renderSuperAdmin(){
   DB.members.forEach(function(m){
     const role = m.id === SUPERADMIN_ID ? 'superadmin' : (m.role || 'member');
     const lastSeen = m.last_seen ? new Date(m.last_seen).toLocaleDateString() : 'Never';
-    const delBtn = m.id === SUPERADMIN_ID ? '' : '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsDeleteMember(this.dataset.mid,this.dataset.mn)">Remove</button>';
+    const username = m.username || ('(' + m.name.split(' ')[0].toLowerCase() + ')');
+    const delBtn = m.id === SUPERADMIN_ID ? '' : '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsDeleteMember(this.dataset.mid,this.dataset.mn)" style="margin-right:4px;">Remove</button>';
+    const resetBtn = '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsResetPassword(this.dataset.mid,this.dataset.mn)">Reset PIN</button>';
+    const setUserBtn = m.username ? '' : '<button class="btn-secondary btn-small" data-mid="' + m.id + '" data-mn="' + escapeHtml(m.name) + '" onclick="adsSetUsername(this.dataset.mid,this.dataset.mn)" style="margin-right:4px;">Set User</button>';
     memberTable += '<tr style="border-bottom:1px solid #f1ebe1;">'
-      + '<td style="padding:8px 4px;font-weight:600;font-size:13px;">' + escapeHtml(m.name) + '</td>'
+      + '<td style="padding:8px 4px;"><div style="font-weight:600;font-size:13px;">' + escapeHtml(m.name) + '</div><div style="font-size:10px;color:var(--muted);">@' + username + '</div></td>'
       + '<td style="padding:8px 4px;font-size:11px;color:' + (roleColor[role]||'var(--muted)') + ';font-weight:700;">' + role.toUpperCase() + '</td>'
       + '<td style="padding:8px 4px;font-size:11px;color:var(--muted);">' + lastSeen + '</td>'
-      + '<td style="padding:8px 4px;">' + delBtn + '</td></tr>';
+      + '<td style="padding:8px 4px;white-space:nowrap;">' + setUserBtn + resetBtn + delBtn + '</td></tr>';
   });
 
   const memberOptions = DB.members
@@ -1494,11 +1602,12 @@ function renderSuperAdmin(){
 
     + '<div class="card" style="margin-top:0;">'
     + '<div class="section-label">➕ Add New Member</div>'
-    + '<div class="row"><input id="adsNewName" placeholder="Full name" style="margin-bottom:0;">'
-    + '<input id="adsNewPass" type="password" placeholder="PIN / Password" style="margin-bottom:0;"></div>'
-    + '<button class="btn-primary" style="margin-top:8px;" onclick="adsAddMember()">Add Member</button>'
-    + '<div class="section-label" style="margin-top:16px;">📋 Bulk Add (Name,PIN — one per line)</div>'
-    + '<textarea id="adsBulkInput" placeholder="Zainab Saifee,1234\nHusain Saifee,5678" style="width:100%;height:80px;padding:10px;border-radius:10px;border:1px solid #E5DDD2;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px;"></textarea>'
+    + '<div class="row"><input id="adsNewName" placeholder="Full name (e.g. Zainab Saifee)" style="margin-bottom:0;">'
+    + '<input id="adsNewUsername" placeholder="Username (e.g. zainab)" autocapitalize="off" style="margin-bottom:0;"></div>'
+    + '<input id="adsNewPass" type="password" placeholder="PIN / Password">'
+    + '<button class="btn-primary" onclick="adsAddMember()">Add Member</button>'
+    + '<div class="section-label" style="margin-top:16px;">📋 Bulk Add (FullName,username,PIN — one per line)</div>'
+    + '<textarea id="adsBulkInput" placeholder="Zainab Saifee,zainab,1234\nHusain Saifee,husain,5678" style="width:100%;height:80px;padding:10px;border-radius:10px;border:1px solid #E5DDD2;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:8px;"></textarea>'
     + '<button class="btn-secondary" onclick="adsBulkAdd()">Bulk Add Members</button>'
     + '<div id="adsBulkResult" style="margin-top:8px;font-size:12px;color:var(--teal-dark);"></div></div>'
 
@@ -1527,19 +1636,22 @@ function renderSuperAdmin(){
 }
 
 async function adsAddMember(){
-  const name = document.getElementById('adsNewName').value.trim();
-  const pass = document.getElementById('adsNewPass').value.trim();
-  if(!name || !pass){ showChatToast('Enter name and PIN.'); return; }
-  if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ showChatToast('Name already exists.'); return; }
-  // Use existing family (first family in DB — all Saifees are one family)
+  const name     = document.getElementById('adsNewName').value.trim();
+  const username = (document.getElementById('adsNewUsername')?.value||'').trim().toLowerCase().replace(/\s+/g,'');
+  const pass     = document.getElementById('adsNewPass').value.trim();
+  if(!name || !username || !pass){ showChatToast('Enter full name, username and PIN.'); return; }
+  if(!/^[a-z0-9_]+$/.test(username)){ showChatToast('Username: letters, numbers, _ only.'); return; }
+  if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ showChatToast('Full name already exists.'); return; }
+  if(DB.members.some(m=>m.username&&m.username.toLowerCase()===username)){ showChatToast('Username already taken.'); return; }
   const familyId = DB.families[0]?.id;
-  if(!familyId){ showChatToast('No family found. Register a family first.'); return; }
-  const { data, error } = await sb.from('members').insert({family_id:familyId, name, password:String(pass), is_head:false, role:'member'}).select().single();
+  if(!familyId){ showChatToast('No family found.'); return; }
+  const { data, error } = await sb.from('members').insert({family_id:familyId, name, username, password:String(pass), is_head:false, role:'member'}).select().single();
   if(error){ showChatToast('Error: ' + error.message); return; }
   document.getElementById('adsNewName').value = '';
+  document.getElementById('adsNewUsername').value = '';
   document.getElementById('adsNewPass').value = '';
   await loadAll();
-  showChatToast('✅ ' + name + ' added!');
+  showChatToast('✅ ' + name + ' (' + username + ') added!');
   renderSuperAdmin();
 }
 
@@ -1553,12 +1665,14 @@ async function adsBulkAdd(){
   let added = 0, skipped = [];
   for(const line of lines){
     const parts = line.split(',');
-    if(parts.length < 2){ skipped.push(line.trim() + ' (bad format)'); continue; }
+    if(parts.length < 3){ skipped.push(line.trim() + ' (need: FullName,username,PIN)'); continue; }
     const name = parts[0].trim();
-    const pass = parts.slice(1).join(',').trim();
-    if(!name || !pass){ skipped.push(line.trim() + ' (empty)'); continue; }
-    if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ skipped.push(name + ' (already exists)'); continue; }
-    const { error } = await sb.from('members').insert({family_id:familyId, name, password:String(pass), is_head:false, role:'member'});
+    const username = parts[1].trim().toLowerCase().replace(/\s+/g,'');
+    const pass = parts.slice(2).join(',').trim();
+    if(!name || !username || !pass){ skipped.push(line.trim() + ' (empty field)'); continue; }
+    if(DB.members.some(m=>m.name.toLowerCase()===name.toLowerCase())){ skipped.push(name + ' (name exists)'); continue; }
+    if(DB.members.some(m=>m.username&&m.username.toLowerCase()===username)){ skipped.push(username + ' (username taken)'); continue; }
+    const { error } = await sb.from('members').insert({family_id:familyId, name, username, password:String(pass), is_head:false, role:'member'});
     if(error){ skipped.push(name + ' (error: ' + error.message + ')'); } else { added++; }
   }
   await loadAll();
@@ -1572,6 +1686,25 @@ async function adsBulkAdd(){
   }
 }
 
+async function adsResetPassword(memberId, name){
+  const newPass = prompt('New PIN / password for ' + name + ':');
+  if(!newPass || !newPass.trim()){ return; }
+  const { error } = await sb.from('members').update({ password: String(newPass.trim()) }).eq('id', memberId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  showChatToast('✅ Password reset for ' + name);
+}
+async function adsSetUsername(memberId, name){
+  const u = prompt('Set username for ' + name + ' (letters/numbers/_ only):');
+  if(!u || !u.trim()) return;
+  const username = u.trim().toLowerCase().replace(/\s+/g,'');
+  if(!/^[a-z0-9_]+$/.test(username)){ showChatToast('Invalid username format.'); return; }
+  if(DB.members.some(m=>m.id!==memberId && m.username && m.username.toLowerCase()===username)){ showChatToast('Username already taken.'); return; }
+  const { error } = await sb.from('members').update({ username }).eq('id', memberId);
+  if(error){ showChatToast('Error: ' + error.message); return; }
+  await loadAll();
+  showChatToast('✅ Username set: @' + username + ' for ' + name);
+  renderSuperAdmin();
+}
 async function adsDeleteMember(memberId, name){
   if(memberId === SUPERADMIN_ID){ showChatToast('Cannot remove Super Admin.'); return; }
   if(!confirm('Remove ' + name + '? This cannot be undone.')) return;
