@@ -102,6 +102,87 @@
 .msg-search-wrap input{padding-left:32px;}
 .msg-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none;}
 
+/* ── WhatsApp-style full-screen chat ── */
+.chat-screen{
+  position:fixed;inset:0;z-index:800;
+  display:flex;flex-direction:column;
+  background:var(--bg);
+  transform:translateX(100%);
+  transition:transform .28s cubic-bezier(.4,0,.2,1);
+}
+.chat-screen.open{ transform:translateX(0); }
+.chat-header{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));
+  background:var(--teal-dark);color:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.15);
+  flex-shrink:0;
+}
+.chat-header-back{
+  font-size:22px;cursor:pointer;padding:4px 8px 4px 0;
+  color:#fff;background:none;border:none;line-height:1;
+}
+.chat-header-avatar{
+  width:36px;height:36px;border-radius:50%;
+  background:rgba(255,255,255,.25);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:15px;color:#fff;flex-shrink:0;
+}
+.chat-header-info{ flex:1;min-width:0; }
+.chat-header-name{ font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.chat-header-status{ font-size:11px;opacity:.85; }
+.chat-messages{
+  flex:1;overflow-y:auto;padding:12px 14px;
+  display:flex;flex-direction:column;gap:2px;
+  background:#EAE0D5;
+}
+.chat-bubble-row{ display:flex;flex-direction:column; }
+.chat-bubble-row.me{ align-items:flex-end; }
+.chat-bubble-row.them{ align-items:flex-start; }
+.chat-bubble{
+  max-width:78%;padding:8px 12px;border-radius:16px;
+  font-size:14px;line-height:1.45;word-break:break-word;
+  position:relative;
+}
+.chat-bubble.me{
+  background:#DCF8C6;color:#1a1a1a;
+  border-bottom-right-radius:4px;
+}
+.chat-bubble.them{
+  background:#fff;color:#1a1a1a;
+  border-bottom-left-radius:4px;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
+.chat-bubble-time{
+  font-size:10px;color:var(--muted);
+  margin-top:2px;padding:0 4px;
+}
+.chat-bubble-seen{ font-size:10px;color:var(--teal);margin-top:1px; }
+.chat-compose-bar{
+  display:flex;align-items:flex-end;gap:8px;
+  padding:8px 12px;padding-bottom:max(8px,env(safe-area-inset-bottom));
+  background:#f0ebe2;border-top:1px solid #ddd6cc;flex-shrink:0;
+}
+.chat-compose-input{
+  flex:1;min-height:40px;max-height:110px;overflow-y:auto;
+  background:#fff;border-radius:22px;padding:10px 14px;
+  font-size:14px;line-height:1.4;outline:none;
+  border:none;box-shadow:0 1px 3px rgba(0,0,0,.1);
+}
+.chat-compose-input:empty:before{ content:attr(data-placeholder);color:#aaa; }
+.chat-send-circle{
+  width:42px;height:42px;border-radius:50%;
+  background:var(--teal);color:#fff;border:none;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;cursor:pointer;flex-shrink:0;
+  transition:background .15s,transform .1s;
+}
+.chat-send-circle:active{ transform:scale(.92); }
+.chat-fmt-bar{
+  display:flex;gap:4px;padding:4px 12px;
+  background:#f0ebe2;flex-wrap:wrap;
+}
+
 /* ── Calendar page-turn animation ── */
 .calgrid-wrap{overflow:hidden;position:relative;}
 @keyframes pageSlideInRight{
@@ -209,7 +290,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -1419,136 +1500,196 @@ function avatarInitial(name){ return (name||'?')[0].toUpperCase(); }
 let chatSearchQ = '';
 function renderChatsSubtab(){
   const others = DB.members.filter(m=>m.id!==session.memberId);
-  const convos = others.map(m=>{
-    const thread = DB.messages.filter(x=>!x.is_broadcast &&
-      ((x.from_id===session.memberId && x.to_id===m.id) || (x.from_id===m.id && x.to_id===session.memberId)));
-    const last = thread.sort((a,b)=>new Date(b.sent_at)-new Date(a.sent_at))[0];
-    const unread = thread.filter(x=>x.to_id===session.memberId && !x.read_at).length;
+  const convos = others.map(function(m){
+    const thread = DB.messages.filter(function(x){ return !x.is_broadcast &&
+      ((x.from_id===session.memberId && x.to_id===m.id)||(x.from_id===m.id && x.to_id===session.memberId)); });
+    const last = thread.sort(function(a,b){ return new Date(b.sent_at)-new Date(a.sent_at); })[0];
+    const unread = thread.filter(function(x){ return x.to_id===session.memberId && !x.read_at; }).length;
     const online = isOnline(m);
-    return { member:m, last, unread, online };
-  }).sort((a,b)=>{
-    // 1st: online members first
+    return { member:m, last:last||null, unread, online };
+  }).sort(function(a,b){
+    // Messages first, sorted by most recent message
+    const aHas=!!a.last, bHas=!!b.last;
+    if(aHas && !bHas) return -1;
+    if(!aHas && bHas) return 1;
+    if(aHas && bHas) return new Date(b.last.sent_at)-new Date(a.last.sent_at);
+    // No messages: online first then last_seen
     if(a.online && !b.online) return -1;
     if(!a.online && b.online) return 1;
-    // 2nd: most recently active (last_seen)
-    const aLS = a.member.last_seen ? new Date(a.member.last_seen) : new Date(0);
-    const bLS = b.member.last_seen ? new Date(b.member.last_seen) : new Date(0);
-    return bLS - aLS;
+    return (new Date(b.member.last_seen||0))-(new Date(a.member.last_seen||0));
   });
 
-  // Filter by search
-  const q = chatSearchQ.toLowerCase().trim();
-  const filtered = q ? convos.filter(c =>
-    c.member.name.toLowerCase().includes(q) ||
-    (c.member.username||'').toLowerCase().includes(q)
-  ) : convos;
-
   const body = document.getElementById('msgBody');
+  if(!body) return;
 
-  // Build convo rows
-  const rows = filtered.map(c => {
-    const m = c.member;
-    const online = c.online;
+  const rows = convos.map(function(c){
+    const m=c.member, online=c.online;
     const lastSeenStr = formatLastSeen(m);
     const preview = c.last ? plainTextPreview(c.last.text).slice(0,50) : 'No messages yet';
-    const lastTime = c.last ? formatLastSeen({last_seen: c.last.sent_at}) : '';
+    const lastTime = c.last ? formatMsgTime(c.last.sent_at) : '';
     const initial = avatarInitial(m.name);
-    return '<div class="convo" data-mid="' + m.id + '" onclick="openChat(this.dataset.mid)">'
-      + '<div class="convo-avatar">' + initial
-      + '<span class="presence-badge ' + (online?'online':'offline') + '"></span>'
-      + '</div>'
-      + '<div class="convo-info">'
-      + '<div class="convo-name">'
-      + escapeHtml(m.name)
-      + (m.username ? '<span class="muted" style="font-size:10px;font-weight:400;">@' + escapeHtml(m.username) + '</span>' : '')
-      + '</div>'
-      + '<div class="convo-preview">' + escapeHtml(preview) + '</div>'
-      + '<div style="font-size:10px;color:' + (online?'#2ecc71':'var(--muted)') + ';margin-top:1px;">'
-      + (online ? '● Online now' : '● ' + lastSeenStr)
-      + '</div>'
-      + '</div>'
-      + '<div class="convo-meta">'
-      + (c.unread ? '<span class="unreadbadge">' + c.unread + '</span>' : '')
-      + '<div class="convo-time">' + lastTime + '</div>'
-      + '</div>'
-      + '</div>';
-  }).join('') || '<div class="muted" style="padding:16px 0;">No members found.</div>';
+    const searchKey = (m.name+' '+(m.username||'')).toLowerCase();
+    return '<div class="convo" data-mid="'+m.id+'" data-search="'+searchKey+'" onclick="openChat(this.dataset.mid)">'
+      +'<div class="convo-avatar">'+initial+'<span class="presence-badge '+(online?'online':'offline')+'"></span></div>'
+      +'<div class="convo-info">'
+      +'<div class="convo-name">'+escapeHtml(m.name)
+      +(m.username?'<span class="muted" style="font-size:10px;font-weight:400;margin-left:4px;">@'+escapeHtml(m.username)+'</span>':'')
+      +'</div>'
+      +'<div class="convo-preview">'+escapeHtml(preview)+'</div>'
+      +'<div style="font-size:10px;color:'+(online?'#2ecc71':'var(--muted)')+';margin-top:1px;">'
+      +(online?'● Online now':'● '+lastSeenStr)+'</div>'
+      +'</div>'
+      +'<div class="convo-meta">'
+      +(c.unread?'<span class="unreadbadge">'+c.unread+'</span>':'')
+      +'<div class="convo-time">'+lastTime+'</div>'
+      +'</div></div>';
+  }).join('')||'<div class="muted" style="padding:16px 0;">No other members yet.</div>';
 
-  body.innerHTML =
-    '<div class="card">'
-    + '<div class="msg-search-wrap">'
-    + '<span class="msg-search-icon">🔍</span>'
-    + '<input type="search" placeholder="Search by name or username…" value="' + escapeHtml(chatSearchQ) + '" oninput="chatSearchQ=this.value;renderChatsSubtab()" style="width:100%;padding-left:32px;">'
-    + '</div>'
-    + rows
-    + '</div>';
+  body.innerHTML = '<div class="card">'
+    +'<div class="msg-search-wrap"><span class="msg-search-icon">🔍</span>'
+    +'<input id="chatSearchInput" type="search" placeholder="Search by name or username…" style="width:100%;padding-left:32px;" oninput="filterChatList(this.value)">'
+    +'</div>'
+    +'<div id="convoList">'+rows+'</div>'
+    +'</div>';
 }
+function filterChatList(q){
+  const term=(q||'').toLowerCase().trim();
+  const rows=document.querySelectorAll('#convoList .convo');
+  let any=false;
+  rows.forEach(function(row){
+    const match=!term||(row.dataset.search||'').includes(term);
+    row.style.display=match?'':'none';
+    if(match) any=true;
+  });
+  let nr=document.getElementById('convoNoResult');
+  if(!any && term){
+    if(!nr){ nr=document.createElement('div'); nr.id='convoNoResult'; nr.className='muted'; nr.style.padding='12px 0'; document.getElementById('convoList').appendChild(nr); }
+    nr.textContent='No results for "'+q+'"';
+  } else if(nr){ nr.remove(); }
+}
+function formatMsgTime(ts){
+  if(!ts) return '';
+  const d=new Date(ts), now=new Date();
+  if(d.toDateString()===now.toDateString()) return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const diff=Math.floor((now-d)/86400000);
+  if(diff===1) return 'Yesterday';
+  if(diff<7) return d.toLocaleDateString([],{weekday:'short'});
+  return d.toLocaleDateString([],{day:'numeric',month:'short'});
+}
+
+
 async function openChat(memberId){
   msgWith = memberId;
   const other = findMember(memberId);
+  if(!other) return;
   await markMessagesRead(memberId, session.memberId);
   await loadAll();
+  renderChatScreen(memberId);
+}
+function renderChatScreen(memberId){
+  const other = findMember(memberId);
+  if(!other) return;
+  const online = isOnline(other);
+  const statusStr = online ? 'Online now' : (other.last_seen ? 'Last seen ' + formatLastSeen(other) : 'Offline');
   const thread = DB.messages.filter(m => !m.is_broadcast &&
     ((m.from_id===session.memberId && m.to_id===memberId) || (m.from_id===memberId && m.to_id===session.memberId))
   ).sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at));
 
-  const alreadyOpen = document.getElementById('chatModalBackdrop') && document.getElementById('chatModalBackdrop').classList.contains('show');
+  // Build bubble rows
+  let bubbles = '';
+  let prevDate = '';
+  thread.forEach(function(m){
+    const mine = m.from_id===session.memberId;
+    const d = new Date(m.sent_at);
+    const dateLabel = d.toDateString();
+    if(dateLabel !== prevDate){
+      prevDate = dateLabel;
+      const isToday = dateLabel === new Date().toDateString();
+      bubbles += '<div style="text-align:center;margin:10px 0 6px;">'
+        + '<span style="background:rgba(0,0,0,.12);color:#fff;font-size:11px;padding:3px 10px;border-radius:10px;">'
+        + (isToday ? 'Today' : d.toLocaleDateString([],{weekday:'long',day:'numeric',month:'long'}))
+        + '</span></div>';
+    }
+    const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const seenTick = mine ? (m.read_at ? ' ✓✓' : ' ✓') : '';
+    bubbles += '<div class="chat-bubble-row ' + (mine?'me':'them') + '">'
+      + '<div class="chat-bubble ' + (mine?'me':'them') + '">' + sanitizeRichText(m.text) + '</div>'
+      + '<div class="chat-bubble-time">' + timeStr + (mine?'<span style="color:' + (m.read_at?'var(--teal)':'#aaa') + ';">' + seenTick + '</span>':'') + '</div>'
+      + '</div>';
+  });
+  if(!bubbles) bubbles = '<div class="empty-hint" style="text-align:center;margin-top:40px;">No messages yet — say hi! 👋</div>';
 
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-backdrop ${alreadyOpen?'show':''}" id="chatModalBackdrop" onclick="if(event.target===this) closeChatModal()">
-      <div class="modal-sheet" id="chatModalSheet">
-        <div class="modal-handle"></div>
-        <span class="modal-close" onclick="closeChatModal()">✕</span>
-        <h2>${escapeHtml(other.name)}</h2>
-        <div id="chatMsgArea" style="max-height:50vh;overflow-y:auto;margin-bottom:10px;">
-          ${thread.map(m=>{
-            const mine = m.from_id===session.memberId;
-            const bubble = `<div class="msgline ${mine?'msg-me':'msg-them'}">${sanitizeRichText(m.text)}</div>`;
-            const seen = mine ? `<div class="seen">${m.read_at ? 'Seen at '+new Date(m.read_at).toLocaleTimeString() : 'Sent'}</div>` : '';
-            return bubble + seen;
-          }).join('') || '<div class="empty-hint">No messages yet — say hi!</div>'}
-        </div>
-        <div class="compose-toolbar">
-          <button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand('bold')"><b>B</b></button>
-          <button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand('italic')"><i>I</i></button>
-          ${['#2B2620','#E8703A','#127A79','#8E2A2A','#3B6FD4'].map(c=>
-            `<button type="button" class="fmt-swatch" style="background:${c};" onmousedown="event.preventDefault();document.execCommand('foreColor', false, '${c}')"></button>`
-          ).join('')}
-        </div>
-        <div id="chatInput" class="fancy-input compose-editable" contenteditable="true" data-placeholder="Type a message..." onkeydown="handleComposeKeydown(event, '${memberId}')"></div>
-        <button class="btn-primary chat-send-btn" onclick="sendMsg('${memberId}')">Send</button>
-      </div>
-    </div>`;
-  if(!alreadyOpen){
-    requestAnimationFrame(()=>{
-      const bd = document.getElementById('chatModalBackdrop');
-      if(bd) bd.classList.add('show');
-    });
-  }
-  attachChatSwipe();
+  // Remove old screen if any
+  let scr = document.getElementById('chatScreen');
+  if(scr) scr.remove();
+
+  scr = document.createElement('div');
+  scr.id = 'chatScreen';
+  scr.className = 'chat-screen';
+  scr.innerHTML =
+    '<div class="chat-header">'
+    + '<button class="chat-header-back" onclick="closeChatScreen()">&#8592;</button>'
+    + '<div class="chat-header-avatar">' + avatarInitial(other.name) + '</div>'
+    + '<div class="chat-header-info">'
+    + '<div class="chat-header-name">' + escapeHtml(other.name) + '</div>'
+    + '<div class="chat-header-status" style="color:' + (online?'#a8f0c6':'rgba(255,255,255,.75)') + ';">' + statusStr + '</div>'
+    + '</div>'
+    + '</div>'
+    + '<div class="chat-fmt-bar">'
+    + '<button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand(&quot;bold&quot;)"><b>B</b></button>'
+    + '<button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand(&quot;italic&quot;)"><i>I</i></button>'
+    + ['#2B2620','#E8703A','#127A79','#8E2A2A','#3B6FD4'].map(function(c){
+        return '<button type="button" class="fmt-swatch" style="background:' + c + ';" data-color="' + c + '" onmousedown="event.preventDefault();applyColor(this.dataset.color)"></button>';
+      }).join('')
+    + '</div>'
+    + '<div class="chat-messages" id="chatMsgArea">' + bubbles + '</div>'
+    + '<div class="chat-compose-bar">'
+    + '<div id="chatInput" class="chat-compose-input compose-editable" contenteditable="true" data-placeholder="Message\u2026"></div>'
+    + '<button class="chat-send-circle chat-send-btn">&#10148;</button>'
+    + '</div>';
+
+  document.body.appendChild(scr);
+  // Wire keydown and send button with correct memberId (avoids quote issues in HTML string)
+  const chatInp = scr.querySelector('#chatInput');
+  const sendBtn = scr.querySelector('.chat-send-btn');
+  if(chatInp) chatInp.addEventListener('keydown', function(e){ handleComposeKeydown(e, memberId); });
+  if(sendBtn) sendBtn.addEventListener('click', function(){ sendMsg(memberId); });
+  // Animate in
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){ scr.classList.add('open'); });
+  });
+  // Scroll to bottom
+  setTimeout(function(){
+    const area = document.getElementById('chatMsgArea');
+    if(area) area.scrollTop = area.scrollHeight;
+  }, 80);
+  // Swipe right to go back
+  attachChatScreenSwipe(scr);
   renderTabBadgeOnly();
 }
-function closeChatModal(){
+function closeChatScreen(){
   msgWith = null;
-  const bd = document.getElementById('chatModalBackdrop');
-  if(!bd) return;
-  bd.classList.remove('show');
-  setTimeout(()=>{ const root = document.getElementById('modalRoot'); if(root) root.innerHTML=''; }, 300);
+  const scr = document.getElementById('chatScreen');
+  if(!scr) return;
+  scr.classList.remove('open');
+  setTimeout(function(){ scr.remove(); }, 300);
+  // Refresh chat list to update unread counts
+  if(msgSubTab==='chats') renderChatsSubtab();
 }
-function attachChatSwipe(){
-  const sheet = document.getElementById('chatModalSheet');
-  if(!sheet) return;
+// Keep old closeChatModal as alias for deep-link compat
+function closeChatModal(){ closeChatScreen(); }
+function attachChatScreenSwipe(scr){
   let sx=0, sy=0, tracking=false;
-  sheet.addEventListener('touchstart', e=>{ const t=e.touches[0]; sx=t.clientX; sy=t.clientY; tracking=true; }, {passive:true});
-  sheet.addEventListener('touchend', e=>{
+  scr.addEventListener('touchstart', function(e){ const t=e.touches[0]; sx=t.clientX; sy=t.clientY; tracking=true; }, {passive:true});
+  scr.addEventListener('touchend', function(e){
     if(!tracking) return; tracking=false;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - sx, dy = t.clientY - sy;
-    if(dx < -55 && Math.abs(dx) > Math.abs(dy)*1.4){
-      closeChatModal(); // swipe left -> back to the chat list, WhatsApp-style
-    }
+    const t=e.changedTouches[0];
+    const dx=t.clientX-sx, dy=t.clientY-sy;
+    // Swipe RIGHT to go back (WhatsApp gesture)
+    if(dx > 60 && Math.abs(dx)>Math.abs(dy)*1.4) closeChatScreen();
   }, {passive:true});
 }
+function applyColor(c){ document.execCommand('foreColor', false, c); }
 function handleComposeKeydown(e, memberId){
   if(e.key === 'Enter' && !e.shiftKey){
     e.preventDefault();
@@ -1653,18 +1794,7 @@ async function sendMsg(memberId){
 
 // Refresh only the message bubbles inside an already-open chat
 function refreshChatThread(memberId){
-  const msgArea = document.getElementById('chatMsgArea');
-  if(!msgArea) return;
-  const thread = DB.messages.filter(m => !m.is_broadcast &&
-    ((m.from_id===session.memberId && m.to_id===memberId) || (m.from_id===memberId && m.to_id===session.memberId))
-  ).sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at));
-  msgArea.innerHTML = thread.map(m=>{
-    const mine = m.from_id===session.memberId;
-    const bubble = `<div class="msgline ${mine?'msg-me':'msg-them'}">${sanitizeRichText(m.text)}</div>`;
-    const seen = mine ? `<div class="seen">${m.read_at ? 'Seen at '+new Date(m.read_at).toLocaleTimeString() : 'Sent'}</div>` : '';
-    return bubble + seen;
-  }).join('') || '<div class="empty-hint">No messages yet — say hi!</div>';
-  msgArea.scrollTop = msgArea.scrollHeight;
+  if(document.getElementById('chatScreen')) renderChatScreen(memberId);
 }
 
 // Toast notification (WhatsApp-style error feedback)
