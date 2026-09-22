@@ -77,6 +77,30 @@
   .day-popover .dpop-title{font-weight:800;color:var(--teal-dark);margin-bottom:6px;font-size:13px;}
   .caldow{font-weight:700;font-size:12px;color:var(--muted);padding-bottom:4px;}
   .calday{border-radius:10px;padding:4px 2px 5px;min-height:52px;background:#fdfaf5;position:relative;}
+/* ── Online presence dot ── */
+.online-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2ecc71;margin-right:6px;flex-shrink:0;
+  box-shadow:0 0 0 0 rgba(46,204,113,0.7);
+  animation:pulse-green 1.8s ease-in-out infinite;}
+@keyframes pulse-green{
+  0%  {box-shadow:0 0 0 0 rgba(46,204,113,0.7);}
+  60% {box-shadow:0 0 0 6px rgba(46,204,113,0);}
+  100%{box-shadow:0 0 0 0 rgba(46,204,113,0);}
+}
+.offline-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#bbb;margin-right:6px;flex-shrink:0;}
+.convo{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f0ebe2;cursor:pointer;}
+.convo:last-child{border-bottom:none;}
+.convo-avatar{width:38px;height:38px;border-radius:50%;background:var(--teal-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--teal-dark);font-size:15px;flex-shrink:0;position:relative;}
+.convo-avatar .presence-badge{position:absolute;bottom:1px;right:1px;width:10px;height:10px;border-radius:50%;border:2px solid #fff;}
+.convo-avatar .presence-badge.online{background:#2ecc71;animation:pulse-green 1.8s ease-in-out infinite;}
+.convo-avatar .presence-badge.offline{background:#ccc;}
+.convo-info{flex:1;min-width:0;}
+.convo-name{font-weight:700;font-size:14px;display:flex;align-items:center;gap:4px;}
+.convo-preview{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.convo-meta{text-align:right;flex-shrink:0;}
+.convo-time{font-size:10px;color:var(--muted);}
+.msg-search-wrap{position:relative;margin-bottom:10px;}
+.msg-search-wrap input{padding-left:32px;}
+.msg-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none;}
 
 /* ── Calendar page-turn animation ── */
 .calgrid-wrap{overflow:hidden;position:relative;}
@@ -185,7 +209,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -284,7 +308,7 @@ async function loadAll(){
     votes: vt.data||[], messages: ms.data||[], notifications: nt.data||[],
     reminders: [], households: hh.data||[]
   };
-  if(session && session.role!=='admin' && session.role!=='superadmin' && session.memberId){
+  if(session && session.memberId){
     const { data } = await sb.from('reminders').select('*').eq('member_id', session.memberId).order('remind_at', {ascending:true});
     DB.reminders = data || [];
   }
@@ -460,7 +484,7 @@ async function refreshQuiet(){
 }
 // Update the PWA app icon badge with unread count
 function updateAppBadge(){
-  if(!session || session.role==='admin'||session.role==='superadmin') return;
+  if(!session || !session.memberId) return;
   const msgCount = unreadMessageCount() + unreadAnnouncementCount();
   const notifCount = DB.notifications.filter(n=>n.member_id===session.memberId && !n.read).length;
   const total = msgCount + notifCount;
@@ -609,7 +633,7 @@ async function enableNotifications(){
 }
 
 function unreadMessageCount(){
-  if(!session || session.role==='admin'||session.role==='superadmin') return 0;
+  if(!session || !session.memberId) return 0;
   return DB.messages.filter(m=>!m.is_broadcast && m.to_id===session.memberId && !m.read_at).length;
 }
 function unreadAnnouncementCount(){
@@ -1014,7 +1038,7 @@ function openDayDetail(dateKey){
 
   const quickPresets = [['15 min',15],['30 min',30],['1 hr',60],['3 hrs',180],['6 hrs',360],['Tomorrow',1440]];
 
-  const reminderSection = (session.role!=='admin'&&session.role!=='superadmin') ? `
+  const reminderSection = true ? `
     <div class="section-label">⏰ Reminders</div>
     <div id="dayReminderList">
       ${dayReminders.length ? dayReminders.map((r,i)=>`
@@ -1376,6 +1400,23 @@ function renderAnnouncementsSubtab(){
         </div>`).join('') : '<div class="muted">No announcements yet.</div>'}
     </div>`;
 }
+function isOnline(member){
+  if(!member || !member.last_seen) return false;
+  return (new Date() - new Date(member.last_seen)) < 3 * 60 * 1000; // online if seen within 3 min
+}
+function formatLastSeen(member){
+  if(!member.last_seen) return 'Never seen';
+  if(isOnline(member)) return 'Online now';
+  const d = new Date(member.last_seen);
+  const now = new Date();
+  const diffMin = Math.floor((now - d) / 60000);
+  if(diffMin < 60) return diffMin + 'm ago';
+  if(diffMin < 1440) return Math.floor(diffMin/60) + 'h ago';
+  return d.toLocaleDateString([], {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+function avatarInitial(name){ return (name||'?')[0].toUpperCase(); }
+
+let chatSearchQ = '';
 function renderChatsSubtab(){
   const others = DB.members.filter(m=>m.id!==session.memberId);
   const convos = others.map(m=>{
@@ -1383,26 +1424,64 @@ function renderChatsSubtab(){
       ((x.from_id===session.memberId && x.to_id===m.id) || (x.from_id===m.id && x.to_id===session.memberId)));
     const last = thread.sort((a,b)=>new Date(b.sent_at)-new Date(a.sent_at))[0];
     const unread = thread.filter(x=>x.to_id===session.memberId && !x.read_at).length;
-    return { member:m, last, unread };
+    const online = isOnline(m);
+    return { member:m, last, unread, online };
   }).sort((a,b)=>{
-    if(!a.last && !b.last) return 0;
-    if(!a.last) return 1;
-    if(!b.last) return -1;
-    return new Date(b.last.sent_at) - new Date(a.last.sent_at);
+    // 1st: online members first
+    if(a.online && !b.online) return -1;
+    if(!a.online && b.online) return 1;
+    // 2nd: most recently active (last_seen)
+    const aLS = a.member.last_seen ? new Date(a.member.last_seen) : new Date(0);
+    const bLS = b.member.last_seen ? new Date(b.member.last_seen) : new Date(0);
+    return bLS - aLS;
   });
+
+  // Filter by search
+  const q = chatSearchQ.toLowerCase().trim();
+  const filtered = q ? convos.filter(c =>
+    c.member.name.toLowerCase().includes(q) ||
+    (c.member.username||'').toLowerCase().includes(q)
+  ) : convos;
+
   const body = document.getElementById('msgBody');
-  body.innerHTML = `
-    <div class="card">
-      <h2>Chats</h2>
-      ${convos.map(c=>`
-        <div class="convo" onclick="openChat('${c.member.id}')">
-          <span>${escapeHtml(c.member.name)} <span class="muted">(${famName(c.member.family_id)})</span>
-            <div class="preview">${c.last? escapeHtml(plainTextPreview(c.last.text)) : 'No messages yet'}</div>
-          </span>
-          ${c.unread? `<span class="unreadbadge">${c.unread}</span>` : ''}
-        </div>`).join('') || '<div class="muted">No other members yet.</div>'}
-    </div>
-  `;
+
+  // Build convo rows
+  const rows = filtered.map(c => {
+    const m = c.member;
+    const online = c.online;
+    const lastSeenStr = formatLastSeen(m);
+    const preview = c.last ? plainTextPreview(c.last.text).slice(0,50) : 'No messages yet';
+    const lastTime = c.last ? formatLastSeen({last_seen: c.last.sent_at}) : '';
+    const initial = avatarInitial(m.name);
+    return '<div class="convo" data-mid="' + m.id + '" onclick="openChat(this.dataset.mid)">'
+      + '<div class="convo-avatar">' + initial
+      + '<span class="presence-badge ' + (online?'online':'offline') + '"></span>'
+      + '</div>'
+      + '<div class="convo-info">'
+      + '<div class="convo-name">'
+      + escapeHtml(m.name)
+      + (m.username ? '<span class="muted" style="font-size:10px;font-weight:400;">@' + escapeHtml(m.username) + '</span>' : '')
+      + '</div>'
+      + '<div class="convo-preview">' + escapeHtml(preview) + '</div>'
+      + '<div style="font-size:10px;color:' + (online?'#2ecc71':'var(--muted)') + ';margin-top:1px;">'
+      + (online ? '● Online now' : '● ' + lastSeenStr)
+      + '</div>'
+      + '</div>'
+      + '<div class="convo-meta">'
+      + (c.unread ? '<span class="unreadbadge">' + c.unread + '</span>' : '')
+      + '<div class="convo-time">' + lastTime + '</div>'
+      + '</div>'
+      + '</div>';
+  }).join('') || '<div class="muted" style="padding:16px 0;">No members found.</div>';
+
+  body.innerHTML =
+    '<div class="card">'
+    + '<div class="msg-search-wrap">'
+    + '<span class="msg-search-icon">🔍</span>'
+    + '<input type="search" placeholder="Search by name or username…" value="' + escapeHtml(chatSearchQ) + '" oninput="chatSearchQ=this.value;renderChatsSubtab()" style="width:100%;padding-left:32px;">'
+    + '</div>'
+    + rows
+    + '</div>';
 }
 async function openChat(memberId){
   msgWith = memberId;
