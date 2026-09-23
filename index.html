@@ -159,11 +159,7 @@
 }
 .chat-header-status{ font-size:11px;opacity:.82;margin-top:1px; }
 
-.chat-fmt-bar{
-  display:flex;gap:4px;padding:5px 14px;
-  background:#f0ebe2;flex-wrap:wrap;
-  flex-shrink:0;border-bottom:1px solid #ddd6cc;
-}
+/* chat-fmt-bar removed */
 
 .chat-messages{
   flex:1;
@@ -349,7 +345,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -604,8 +600,20 @@ async function markNotifsRead(memberId){
   await sb.from('notifications').update({read:true}).eq('member_id', memberId).eq('read', false);
 }
 async function heartbeat(){
-  if(session && session.memberId!=='ADMIN'){
-    await sb.from('members').update({last_seen: new Date().toISOString()}).eq('id', session.memberId);
+  if(session && session.memberId){
+    const now = new Date().toISOString();
+    await sb.from('members').update({last_seen: now}).eq('id', session.memberId);
+    // Update in-memory DB immediately — don't wait for realtime or next loadAll
+    const me = DB.members.find(m => m.id === session.memberId);
+    if(me) me.last_seen = now;
+    // Also refresh other members' last_seen from DB every heartbeat cycle
+    const { data } = await sb.from('members').select('id, last_seen');
+    if(data) data.forEach(function(row){
+      const m = DB.members.find(function(x){ return x.id === row.id; });
+      if(m) m.last_seen = row.last_seen;
+    });
+    // Re-render chat list if it's open (updates online dots live)
+    if(activeTab === 'messages' && msgSubTab === 'chats') renderChatsSubtab();
   }
 }
 
@@ -1697,13 +1705,6 @@ function renderChatScreen(memberId){
     + '<div class="chat-header-status" style="color:' + (online?'#a8f0c6':'rgba(255,255,255,.75)') + ';">' + statusStr + '</div>'
     + '</div>'
     + '</div>'
-    + '<div class="chat-fmt-bar">'
-    + '<button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand(&quot;bold&quot;)"><b>B</b></button>'
-    + '<button type="button" class="fmt-btn" onmousedown="event.preventDefault();document.execCommand(&quot;italic&quot;)"><i>I</i></button>'
-    + ['#2B2620','#E8703A','#127A79','#8E2A2A','#3B6FD4'].map(function(c){
-        return '<button type="button" class="fmt-swatch" style="background:' + c + ';" data-color="' + c + '" onmousedown="event.preventDefault();applyColor(this.dataset.color)"></button>';
-      }).join('')
-    + '</div>'
     + '<div class="chat-messages" id="chatMsgArea">' + bubbles + '</div>'
     + '<div class="chat-compose-bar">'
     + '<div id="chatInput" class="chat-compose-input compose-editable" contenteditable="true" data-placeholder="Message\u2026"></div>'
@@ -1715,9 +1716,17 @@ function renderChatScreen(memberId){
   const chatInp = scr.querySelector('#chatInput');
   const sendBtn = scr.querySelector('.chat-send-btn');
   if(chatInp){
-    chatInp.addEventListener('keydown', function(e){ handleComposeKeydown(e, memberId); });
-    // Focus input after animation completes
-    setTimeout(function(){ /* don't auto-focus — user should tap */ }, 350);
+    chatInp.addEventListener('keydown',  function(e){ handleComposeKeydown(e, memberId); });
+    chatInp.addEventListener('keypress', function(e){ handleComposeKeypress(e, memberId); });
+    // On mobile Enter inserts a newline then fires input — catch and clean it up
+    chatInp.addEventListener('input', function(){
+      // If last char is newline from Enter on mobile virtual keyboard,
+      // and the user didn't hold Shift, send
+      if(window._pendingMobileSend){
+        window._pendingMobileSend = false;
+        sendMsg(memberId);
+      }
+    });
   }
   if(sendBtn) sendBtn.addEventListener('click', function(){ sendMsg(memberId); });
 
@@ -1782,11 +1791,22 @@ function attachChatScreenSwipe(scr){
 }
 function applyColor(c){ document.execCommand('foreColor', false, c); }
 function handleComposeKeydown(e, memberId){
+  // Desktop: Enter sends, Shift+Enter = newline
   if(e.key === 'Enter' && !e.shiftKey){
     e.preventDefault();
+    e.stopPropagation();
     sendMsg(memberId);
+    return false;
   }
-  // Shift+Enter falls through to the browser's normal newline behavior
+}
+// iOS virtual keyboard fires keypress differently — catch it here too
+function handleComposeKeypress(e, memberId){
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    e.stopPropagation();
+    sendMsg(memberId);
+    return false;
+  }
 }
 function sanitizeRichText(html){
   const allowed = ['B','STRONG','I','EM','U','BR','SPAN','DIV'];
@@ -1876,16 +1896,49 @@ async function sendMsg(memberId){
     return;
   }
 
-  // Refresh only the message bubbles (no full page rebuild)
+  // Refresh bubbles only — never re-create the screen (no flip)
   await loadAll();
   refreshChatThread(memberId);
   renderTabBadgeOnly();
-  input.focus();
+  // Restore focus without scrolling page
+  if(input) input.focus({ preventScroll: true });
 }
 
 // Refresh only the message bubbles inside an already-open chat
 function refreshChatThread(memberId){
-  if(document.getElementById('chatScreen')) renderChatScreen(memberId);
+  // ONLY update the message bubbles — never re-create the screen (prevents flip animation)
+  const msgArea = document.getElementById('chatMsgArea');
+  if(!msgArea) return;
+  const thread = DB.messages.filter(function(m){ return !m.is_broadcast &&
+    ((m.from_id===session.memberId && m.to_id===memberId)||(m.from_id===memberId && m.to_id===session.memberId));
+  }).sort(function(a,b){ return new Date(a.sent_at)-new Date(b.sent_at); });
+
+  let bubbles = '';
+  let prevDate = '';
+  thread.forEach(function(m){
+    const mine = m.from_id===session.memberId;
+    const d = new Date(m.sent_at);
+    const dateLabel = d.toDateString();
+    if(dateLabel !== prevDate){
+      prevDate = dateLabel;
+      const isToday = dateLabel === new Date().toDateString();
+      bubbles += '<div style="text-align:center;margin:10px 0 6px;">'
+        +'<span style="background:rgba(0,0,0,.12);color:#555;font-size:11px;padding:3px 10px;border-radius:10px;">'
+        +(isToday?'Today':d.toLocaleDateString([],{weekday:'long',day:'numeric',month:'long'}))
+        +'</span></div>';
+    }
+    const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const seenTick = mine?(m.read_at?' ✓✓':' ✓'):'';
+    const seenColor = m.read_at?'var(--teal)':'#aaa';
+    bubbles += '<div class="chat-bubble-row '+(mine?'me':'them')+'">'
+      +'<div class="chat-bubble '+(mine?'me':'them')+'">'+sanitizeRichText(m.text)+'</div>'
+      +'<div class="chat-bubble-time">'+timeStr+(mine?'<span style="color:'+seenColor+';">'+seenTick+'</span>':'')+'</div>'
+      +'</div>';
+  });
+  if(!bubbles) bubbles='<div class="empty-hint" style="text-align:center;margin-top:40px;">No messages yet — say hi! 👋</div>';
+  const wasAtBottom = (msgArea.scrollHeight - msgArea.scrollTop - msgArea.clientHeight) < 80;
+  msgArea.innerHTML = bubbles;
+  if(wasAtBottom) msgArea.scrollTop = msgArea.scrollHeight;
 }
 
 // Toast notification (WhatsApp-style error feedback)
