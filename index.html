@@ -345,7 +345,7 @@
 const SUPABASE_URL = "https://pbltqmcoiliunknfzrtv.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AbrcXkLsz4L28bb50f6P-g_8ArnpJLa";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const APP_VERSION = "3.4";
+const APP_VERSION = "3.5";
 const SUPERADMIN_ID = "2fd8f25f-6a03-42d8-9ab7-307d2084dd33"; // Ali Asgar Saifee — permanent super admin
 
 /* ================= Hijri conversion ================= */
@@ -714,6 +714,9 @@ async function boot(){
   loadCachedDB(); // paint instantly with whatever we saw last time, no waiting on the network
   render();
   attachAppSwipe();
+  // Unlock AudioContext on first user interaction anywhere on the page
+  document.addEventListener('touchstart', unlockAudio, {once:true, passive:true});
+  document.addEventListener('mousedown',  unlockAudio, {once:true, passive:true});
   try{
     await loadAll(); // now sync the real data quietly in the background
     if(session && session.role!=='admin' && !DB.members.some(m=>m.id===session.memberId)){
@@ -1071,27 +1074,59 @@ function showDayPreview(dateKey, cellEl){
   requestAnimationFrame(()=> requestAnimationFrame(()=> pop.classList.add('show')));
 }
 // Page-turn sound via Web Audio API (no external file needed)
+// Shared AudioContext — created once, reused every call
+// Must be resumed inside a user gesture (tap/click) — we do that in shiftMonth
+let _sharedAudioCtx = null;
+function getAudioCtx(){
+  if(!_sharedAudioCtx){
+    try{ _sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+    catch(e){ return null; }
+  }
+  return _sharedAudioCtx;
+}
+// Call this on first user tap to unlock AudioContext for the whole session
+function unlockAudio(){
+  const ctx = getAudioCtx();
+  if(ctx && ctx.state === 'suspended'){
+    ctx.resume().catch(function(){});
+  }
+}
+
 function playPageTurnSound(){
   try{
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for(let i=0;i<data.length;i++){
-      // White noise with fast exponential decay — sounds like paper rustle
-      data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 2.5) * 0.35;
+    const ctx = getAudioCtx();
+    if(!ctx) return;
+    // Resume if suspended (iOS requires this inside the gesture handler)
+    const play = function(){
+      const dur = 0.2;
+      const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i = 0; i < data.length; i++){
+        // Paper rustle: white noise with sharp exponential decay
+        data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 2.2) * 0.4;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      // Band-pass filter — makes it crispier like flipping paper
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 3200;
+      filter.Q.value = 0.6;
+      // Gain node to control volume
+      const gain = ctx.createGain();
+      gain.gain.value = 0.7;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      src.start(ctx.currentTime);
+      src.stop(ctx.currentTime + dur);
+    };
+    if(ctx.state === 'suspended'){
+      ctx.resume().then(play).catch(function(){});
+    } else {
+      play();
     }
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    // Band-pass filter to make it crispier like paper
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 2800;
-    filter.Q.value = 0.7;
-    src.connect(filter);
-    filter.connect(ctx.destination);
-    src.start();
-    src.stop(ctx.currentTime + 0.18);
-  }catch(e){ /* AudioContext not available */ }
+  }catch(e){ /* AudioContext not available on this device */ }
 }
 
 function shiftMonth(delta){
